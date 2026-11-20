@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 use studio_library::catalog::Sample;
 
 impl Studio {
@@ -190,27 +191,12 @@ impl Studio {
         muted(ui, "WAV · AIFF · MP3");
         ui.horizontal_wrapped(|ui| {
             search_field(ui, &mut self.samples.query, "파일명 검색");
-            let available: BTreeSet<_> = self
-                .samples
-                .rows
-                .iter()
-                .flat_map(|row| row.tags.iter())
-                .collect();
             egui::ComboBox::from_id_salt("filter_add")
                 .selected_text("Filter by tag")
                 .height(290.0)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                 .show_ui(ui, |ui| {
-                    if available.is_empty() {
-                        muted(ui, "표시할 태그 없음");
-                    }
-                    for tag in available {
-                        if !matches_tags(&self.samples.filters, std::slice::from_ref(tag))
-                            && ui.button(labels::tag(tag).into_owned()).clicked()
-                        {
-                            self.samples.filters.push(tag.clone());
-                            self.samples.active_folder = None;
-                        }
-                    }
+                    self.tag_filter_menu(ui);
                 });
         });
         if !self.samples.filters.is_empty() {
@@ -238,7 +224,31 @@ impl Studio {
                     && matches_tags(&row.tags, &self.samples.filters)
             })
             .collect();
-        let mut choose = None;
+        let mut navigation = None;
+        let text_editing = ctx
+            .memory(|memory| memory.focused())
+            .is_some_and(|id| egui::TextEdit::load_state(ctx, id).is_some());
+        if !text_editing
+            && self.plan.is_none()
+            && !self.show_warnings
+            && !egui::Popup::is_any_open(ctx)
+        {
+            let direction = ctx.input_mut(|input| {
+                if !input.modifiers.is_none() {
+                    return 0;
+                }
+                let down = input.count_and_consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown);
+                let up = input.count_and_consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp);
+                down as isize - up as isize
+            });
+            if direction != 0 {
+                let current = rows
+                    .iter()
+                    .position(|row| self.samples.focus.as_ref() == Some(&row.source.path));
+                navigation = next_preview_index(current, rows.len(), direction);
+            }
+        }
+        let mut choose = navigation.map(|index| rows[index]);
         let mut copy = false;
         let ready = self.ready();
         let summary = format!(
@@ -280,12 +290,27 @@ impl Studio {
                 },
             );
         }
+        const ROW_HEIGHT: f32 = 55.0;
         ScrollArea::vertical()
             .auto_shrink([false, false])
-            .show_rows(ui, 55.0, rows.len(), |ui, visible| {
-                for row in &rows[visible] {
+            .show_rows(ui, ROW_HEIGHT, rows.len(), |ui, visible| {
+                if let Some(index) = navigation.filter(|index| !visible.contains(index)) {
+                    let offset = (index as f32 - visible.start as f32)
+                        * (ROW_HEIGHT + ui.spacing().item_spacing.y);
+                    let top = ui.max_rect().top() + offset;
+                    let rect = egui::Rect::from_min_size(
+                        egui::pos2(ui.max_rect().left(), top),
+                        egui::vec2(0.0, ROW_HEIGHT),
+                    );
+                    ui.scroll_to_rect_animation(rect, None, egui::style::ScrollAnimation::none());
+                }
+                for index in visible {
+                    let row = rows[index];
                     let path = &row.source.path;
-                    let focused = self.samples.focus.as_ref() == Some(path);
+                    let focused = choose
+                        .map(|row| &row.source.path)
+                        .or(self.samples.focus.as_ref())
+                        == Some(path);
                     ui.horizontal(|ui| {
                         let mut marked = self.samples.selected.contains(path);
                         if ui
@@ -304,7 +329,7 @@ impl Studio {
                             egui::vec2(name_width, ui.spacing().interact_size.y),
                             egui::Layout::left_to_right(egui::Align::Center),
                             |ui| {
-                                if ui
+                                let button = ui
                                     .add(
                                         egui::Button::selectable(
                                             focused,
@@ -312,10 +337,15 @@ impl Studio {
                                         )
                                         .truncate(),
                                     )
-                                    .on_hover_text(name(path))
-                                    .clicked()
-                                {
-                                    choose = Some((path.clone(), display_tags(&row.tags)));
+                                    .on_hover_text(name(path));
+                                if navigation == Some(index) {
+                                    button.scroll_to_me_animation(
+                                        None,
+                                        egui::style::ScrollAnimation::none(),
+                                    );
+                                }
+                                if button.clicked() {
+                                    choose = Some(row);
                                 }
                             },
                         );
@@ -347,12 +377,46 @@ impl Studio {
                     });
                 }
             });
-        if let Some((path, tags)) = choose {
+        if let Some(row) = choose {
+            let path = row.source.path.clone();
+            let tags = display_tags(&row.tags);
+            self.player.play(row.source.clone(), self.volume);
             self.samples.focus = Some(path);
             self.samples.draft_tags = tags;
+            ctx.request_repaint();
         }
         if copy {
             self.prepare_sample_copy(ctx);
+        }
+    }
+
+    fn tag_filter_menu(&mut self, ui: &mut Ui) {
+        ui.set_min_width(180.0);
+        let mut groups = BTreeMap::<_, BTreeSet<_>>::new();
+        for tag in self.samples.rows.iter().flat_map(|row| &row.tags) {
+            let (category, label) = labels::tag_parts(tag).unwrap_or(("Custom tags", tag.as_str()));
+            groups.entry(category).or_default().insert((label, tag));
+        }
+        if groups.is_empty() {
+            muted(ui, "표시할 태그 없음");
+        }
+        for (category, tags) in groups {
+            egui::CollapsingHeader::new(category).show(ui, |ui| {
+                for (label, tag) in tags {
+                    let mut selected =
+                        matches_tags(&self.samples.filters, std::slice::from_ref(tag));
+                    if ui.checkbox(&mut selected, label).changed() {
+                        if selected {
+                            self.samples.filters.push(tag.clone());
+                        } else {
+                            self.samples
+                                .filters
+                                .retain(|filter| key(filter) != key(tag));
+                        }
+                        self.samples.active_folder = None;
+                    }
+                }
+            });
         }
     }
 
@@ -390,7 +454,7 @@ impl Studio {
             .find(|row| Some(&row.source.path) == self.samples.focus.as_ref())
             .cloned()
         else {
-            muted(ui, "샘플 선택 → Play로 미리듣기");
+            muted(ui, "샘플 클릭 또는 ↑/↓로 미리듣기");
             return;
         };
         ui.heading(name(&row.source.path));
@@ -501,6 +565,19 @@ impl Studio {
     }
 }
 
+fn next_preview_index(current: Option<usize>, count: usize, direction: isize) -> Option<usize> {
+    let last = count.checked_sub(1)?;
+    match current {
+        Some(index) => {
+            let next = index.saturating_add_signed(direction).min(last);
+            (next != index).then_some(next)
+        }
+        None if direction > 0 => Some(0),
+        None if direction < 0 => Some(last),
+        None => None,
+    }
+}
+
 fn display_tags(tags: &[String]) -> String {
     tags.iter()
         .map(|tag| labels::tag(tag))
@@ -513,5 +590,22 @@ fn duration(seconds: Option<f64>) -> String {
         Some(seconds) if seconds < 1.0 => format!("{seconds:.3} s"),
         Some(seconds) => format!("{seconds:.2} s"),
         None => "Unknown".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::next_preview_index;
+
+    #[test]
+    fn arrow_navigation_stays_within_the_visible_sample_list() {
+        assert_eq!(next_preview_index(None, 0, 1), None);
+        assert_eq!(next_preview_index(None, 3, 1), Some(0));
+        assert_eq!(next_preview_index(None, 3, -1), Some(2));
+        assert_eq!(next_preview_index(Some(0), 3, 1), Some(1));
+        assert_eq!(next_preview_index(Some(1), 3, -1), Some(0));
+        assert_eq!(next_preview_index(Some(0), 3, -1), None);
+        assert_eq!(next_preview_index(Some(2), 3, 1), None);
+        assert_eq!(next_preview_index(Some(0), 3, 12), Some(2));
     }
 }

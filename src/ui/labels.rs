@@ -98,17 +98,18 @@ const TAGS: &[Labels] = &[
     ),
 ];
 
+pub(super) fn tag_parts(value: &str) -> Option<(&'static str, &'static str)> {
+    let (category, label) = value.split_once(" · ")?;
+    let (_, display, labels) = TAGS.iter().find(|(stored, _, _)| *stored == category)?;
+    let (_, text) = labels.iter().find(|(key, _)| *key == label)?;
+    Some((display, text))
+}
+
 pub(super) fn tag(value: &str) -> Cow<'_, str> {
-    if let Some((category, label)) = value.split_once(" · ") {
-        for (stored, display, labels) in TAGS {
-            if category == *stored
-                && let Some((_, text)) = labels.iter().find(|(key, _)| *key == label)
-            {
-                return Cow::Owned(format!("{display} · {text}"));
-            }
-        }
+    match tag_parts(value) {
+        Some((category, label)) => Cow::Owned(format!("{category} · {label}")),
+        None => Cow::Borrowed(value),
     }
-    Cow::Borrowed(value)
 }
 
 pub(super) fn stored_tag(value: String) -> String {

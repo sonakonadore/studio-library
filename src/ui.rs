@@ -1,7 +1,7 @@
 use crate::jobs::{Event, Job, Outcome};
 use crate::player::{Playback, Player};
 use anyhow::Result;
-use eframe::egui::{self, Color32, Context, Frame, RichText, ScrollArea, Ui};
+use eframe::egui::{self, Context, Frame, RichText, ScrollArea, Ui};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -12,17 +12,13 @@ use studio_library::{
     scope::{Cancelled, Scope, Source, extension, key, name, safe_component},
 };
 
+mod labels;
 mod project_tab;
 mod sample_tab;
 
-const BG: Color32 = Color32::from_rgb(22, 25, 27);
-const SURFACE: Color32 = Color32::from_rgb(29, 33, 35);
-const RAISED: Color32 = Color32::from_rgb(39, 44, 47);
-const LINE: Color32 = Color32::from_rgb(54, 61, 63);
-const TEXT: Color32 = Color32::from_rgb(231, 237, 234);
-const MUTED: Color32 = Color32::from_rgb(166, 181, 178);
-const ACCENT: Color32 = Color32::from_rgb(151, 231, 197);
-const WARN: Color32 = Color32::from_rgb(255, 194, 137);
+mod theme;
+
+use theme::{ACCENT, BG, BUTTON_ORANGE, GOLD, LINE, MUTED, RAISED, RULE, SURFACE, TEXT, WARN};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -60,6 +56,7 @@ struct SampleView {
 
 pub struct Studio {
     db: PathBuf,
+    paper_grain: egui::TextureHandle,
     store: Store,
     settings: Settings,
     tab: Tab,
@@ -77,7 +74,8 @@ pub struct Studio {
 
 impl Studio {
     pub fn new(ctx: &Context) -> Result<Self> {
-        appearance(ctx);
+        theme::style(ctx);
+        let paper_grain = theme::grain(ctx)?;
         let db = database_path()?;
         let store = Store::open(&db)?;
         let settings = store.settings()?;
@@ -89,6 +87,7 @@ impl Studio {
             .unwrap_or_default();
         let mut app = Self {
             db,
+            paper_grain,
             store,
             settings,
             tab: Tab::Projects,
@@ -99,7 +98,7 @@ impl Studio {
             },
             job: None,
             plan: None,
-            status: "준비".into(),
+            status: "준비 완료".into(),
             warnings: Vec::new(),
             show_warnings: false,
             player: Player::new(ctx.clone()),
@@ -133,7 +132,7 @@ impl Studio {
 
     fn error(&mut self, error: anyhow::Error) {
         self.status = if error.is::<Cancelled>() {
-            "작업 취소됨".into()
+            "작업 취소".into()
         } else {
             format!("실패 · {error:#}")
         };
@@ -163,7 +162,7 @@ impl Studio {
                 Ok(Event::Done(outcome)) => break outcome,
                 Err(std::sync::mpsc::TryRecvError::Empty) => return,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    break Err(anyhow::anyhow!("백그라운드 작업이 중단되었습니다."));
+                    break Err(anyhow::anyhow!("작업 중단 · 다시 시도"));
                 }
             }
         };
@@ -172,7 +171,7 @@ impl Studio {
         match result {
             Ok(Outcome::Projects(scan)) => {
                 self.status = format!(
-                    "프로젝트 탐색 완료 · {}개 · 링크 {}개 건너뜀",
+                    "탐색 완료 · 프로젝트 {}개 · 건너뛴 링크 {}개",
                     scan.projects.len(),
                     scan.skipped
                 );
@@ -190,7 +189,7 @@ impl Studio {
             }
             Ok(Outcome::Samples(scan)) => {
                 self.status = format!(
-                    "샘플 탐색 완료 · {}개 · 새로 분석 {}개 · 링크 등 {}개 건너뜀",
+                    "탐색 완료 · 샘플 {}개 · 새로 분석 {}개 · 건너뛴 항목 {}개",
                     scan.rows.len(),
                     scan.decoded,
                     scan.skipped
@@ -199,7 +198,7 @@ impl Studio {
                 self.replace_samples(scan.rows);
             }
             Ok(Outcome::Plan(plan)) => {
-                self.status = "출발지와 대상을 확인하세요.".into();
+                self.status = "원본, 복사 위치 확인".into();
                 self.plan = Some(plan);
             }
             Ok(Outcome::Copy(report)) => {
@@ -213,7 +212,7 @@ impl Studio {
                 {
                     self.status = message;
                 } else {
-                    self.status = format!("{message} · 복사 위치 기록 {}", self.status);
+                    self.status = format!("{message} · 복사 위치 저장 실패 · {}", self.status);
                 }
             }
             Err(error) => self.error(error),
@@ -227,62 +226,69 @@ impl Studio {
         egui::TopBottomPanel::top("header")
             .frame(
                 Frame::new()
-                    .fill(SURFACE)
-                    .inner_margin(egui::Margin::symmetric(24, 13))
+                    .fill(GOLD)
+                    .inner_margin(egui::Margin::symmetric(27, 17))
                     .stroke(egui::Stroke::new(1.0_f32, LINE)),
             )
             .show(ctx, |ui| {
+                let grain = ui.painter().add(egui::Shape::Noop);
                 ui.horizontal(|ui| {
-                    let (rect, _) =
-                        ui.allocate_exact_size(egui::vec2(30.0, 31.0), egui::Sense::hover());
-                    let painter = ui.painter();
-                    painter.rect_filled(rect, 7, ACCENT);
-                    for (i, height) in [8.0, 15.0, 20.0, 12.0].into_iter().enumerate() {
-                        let x = rect.left() + 7.0 + (i as f32) * 5.0;
-                        let middle = rect.center().y;
-                        painter.line_segment(
-                            [
-                                egui::pos2(x, middle - height / 2.0),
-                                egui::pos2(x, middle + height / 2.0),
-                            ],
-                            egui::Stroke::new(2.0_f32, BG),
-                        );
-                    }
+                    theme::mark(ui);
                     ui.add_space(5.0);
-                    ui.label(RichText::new("스튜디오 라이브러리").size(22.0).strong());
+                    let title = RichText::new("Studio Library").font(theme::display_font(37.0));
+                    let brand = ui
+                        .add(
+                            egui::Label::new(title)
+                                .selectable(false)
+                                .sense(egui::Sense::click()),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text("탭 전환 · Tab");
+                    if brand.clicked() {
+                        self.toggle_tab();
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new("로컬 라이브러리").color(MUTED));
+                        for (tab, label) in [(Tab::Samples, "Samples"), (Tab::Projects, "Projects")]
+                        {
+                            let selected = self.tab == tab;
+                            let label = RichText::new(label)
+                                .font(theme::display_font(14.0))
+                                .color(TEXT);
+                            let button = egui::Button::new(label).fill(if selected {
+                                BUTTON_ORANGE
+                            } else {
+                                RAISED
+                            });
+                            if ui.add_sized([112.0, 34.0], button).clicked() {
+                                self.tab = tab;
+                            }
+                        }
                     });
                 });
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    for (tab, label) in [
-                        (Tab::Projects, "프로젝트 정리"),
-                        (Tab::Samples, "샘플 라이브러리"),
-                    ] {
-                        if ui
-                            .add_sized(
-                                [135.0, 31.0],
-                                egui::Button::selectable(self.tab == tab, label),
-                            )
-                            .clicked()
-                        {
-                            self.tab = tab;
-                        }
-                    }
-                });
+                let rect = ui.min_rect().expand2(egui::vec2(27.0, 17.0));
+                ui.painter()
+                    .set(grain, theme::paper(ui, self.paper_grain.id(), rect));
             });
+    }
+
+    fn toggle_tab(&mut self) {
+        self.tab = match self.tab {
+            Tab::Projects => Tab::Samples,
+            Tab::Samples => Tab::Projects,
+        };
     }
 
     fn footer(&mut self, ctx: &Context) {
         egui::TopBottomPanel::bottom("status")
+            .min_height(42.0)
             .frame(
                 Frame::new()
                     .fill(SURFACE)
                     .stroke(egui::Stroke::new(1.0_f32, LINE))
-                    .inner_margin(egui::Margin::symmetric(20, 9)),
+                    .inner_margin(egui::Margin::symmetric(23, 10)),
             )
             .show(ctx, |ui| {
+                let grain = ui.painter().add(egui::Shape::Noop);
                 ui.horizontal(|ui| {
                     if let Some(job) = &self.job {
                         ui.spinner();
@@ -294,7 +300,7 @@ impl Studio {
                         };
                         ui.label(RichText::new(format!("{label} {}", job.progress)).color(ACCENT));
                         if ui
-                            .add_enabled(!cancelled, egui::Button::new("취소"))
+                            .add_enabled(!cancelled, egui::Button::new("Cancel"))
                             .clicked()
                         {
                             job.cancel.store(true, Ordering::Relaxed);
@@ -312,19 +318,22 @@ impl Studio {
                         .on_hover_text(&self.status);
                         if !self.warnings.is_empty()
                             && ui
-                                .button(format!("경고 {}개", self.warnings.len()))
+                                .button(format!("Warnings ({})", self.warnings.len()))
                                 .clicked()
                         {
                             self.show_warnings = true;
                         }
                     }
                 });
+                let rect = ui.min_rect().expand2(egui::vec2(23.0, 10.0));
+                ui.painter()
+                    .set(grain, theme::paper(ui, self.paper_grain.id(), rect));
             });
     }
 
     fn dialogs(&mut self, ctx: &Context) {
         if self.show_warnings {
-            egui::Window::new("탐색 경고")
+            egui::Window::new("Scan warnings")
                 .open(&mut self.show_warnings)
                 .default_width(540.0)
                 .show(ctx, |ui| {
@@ -340,14 +349,16 @@ impl Studio {
             let mut decline = false;
             egui::Modal::new(egui::Id::new("approved_copy")).show(ctx, |ui| {
                 ui.set_width(650.0);
-                ui.heading("복사 계획 확인");
-                ui.label(format!("대상  {}", plan.target().display()));
+                ui.heading("Review copy plan");
+                muted(ui, "원본 보존 · 아래 위치에 복사");
+                ui.label(format!("Destination  {}", plan.target().display()));
                 ui.label(
-                    RichText::new(format!("예상 용량  {}", byte_count(plan.bytes()))).color(ACCENT),
+                    RichText::new(format!("Estimated size  {}", byte_count(plan.bytes())))
+                        .color(ACCENT),
                 );
                 if plan.skipped > 0 {
                     ui.label(
-                        RichText::new(format!("링크 또는 특수 항목 {}개 건너뜀", plan.skipped))
+                        RichText::new(format!("링크/특수 파일 {}개 건너뜀", plan.skipped))
                             .color(WARN),
                     );
                 }
@@ -358,14 +369,14 @@ impl Studio {
                     plan.entry_count(),
                     |ui, range| {
                         for item in plan.previews(range) {
-                            let source = format!("출발지  {}", item.source.display());
+                            let source = format!("Source  {}", item.source.display());
                             ui.add(egui::Label::new(RichText::new(&source).strong()).truncate())
                                 .on_hover_text(source);
                             let target = format!(
-                                "대상  {}  ·  {}",
+                                "Destination  {}  ·  {}",
                                 item.target.display(),
                                 if item.directory {
-                                    "폴더".into()
+                                    "Folder".into()
                                 } else {
                                     byte_count(item.bytes)
                                 }
@@ -380,8 +391,8 @@ impl Studio {
                 );
                 ui.separator();
                 ui.horizontal(|ui| {
-                    approve = action(ui, true, "승인하고 복사");
-                    decline = ui.button("닫기").clicked();
+                    approve = action(ui, true, "Confirm copy");
+                    decline = ui.button("Close").clicked();
                 });
             });
             if approve {
@@ -392,7 +403,7 @@ impl Studio {
                     Ok(Outcome::Copy(report))
                 }));
             } else if decline {
-                self.status = "복사 취소됨".into();
+                self.status = "복사 취소".into();
             } else {
                 self.plan = Some(plan);
             }
@@ -410,6 +421,12 @@ impl eframe::App for Studio {
             job.cancel.store(true, Ordering::Relaxed);
             self.close_after_job = true;
         }
+        let dialog_open = self.plan.is_some()
+            || self.show_warnings
+            || (self.tab == Tab::Projects && self.projects.show_rules);
+        if !dialog_open && !egui::Popup::is_any_open(ctx) && take_tab_shortcut(ctx) {
+            self.toggle_tab();
+        }
         self.header(ctx);
         self.footer(ctx);
         match self.tab {
@@ -420,84 +437,91 @@ impl eframe::App for Studio {
     }
 }
 
-fn appearance(ctx: &Context) {
-    let mut fonts = egui::FontDefinitions::default();
-    if let Ok(data) = std::fs::read("/System/Library/Fonts/AppleSDGothicNeo.ttc") {
-        fonts
-            .font_data
-            .insert("Korean".into(), egui::FontData::from_owned(data).into());
-        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-            fonts
-                .families
-                .entry(family)
-                .or_default()
-                .push("Korean".into());
-        }
+fn take_tab_shortcut(ctx: &Context) -> bool {
+    let (toggle, consumed) = ctx.input_mut(|input| {
+        let mut toggle = false;
+        let before = input.events.len();
+        input.events.retain(|event| {
+            if let egui::Event::Key {
+                key: egui::Key::Tab,
+                pressed: true,
+                repeat,
+                modifiers,
+                ..
+            } = event
+                && modifiers.is_none()
+            {
+                if !repeat {
+                    toggle = !toggle;
+                }
+                false
+            } else {
+                true
+            }
+        });
+        (toggle, input.events.len() != before)
+    });
+    if consumed {
+        ctx.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
     }
-    ctx.set_fonts(fonts);
-    let mut style = (*ctx.style()).clone();
-    let mut visuals = egui::Visuals::dark();
-    visuals.override_text_color = Some(TEXT);
-    visuals.panel_fill = BG;
-    visuals.window_fill = SURFACE;
-    visuals.window_stroke = egui::Stroke::new(1.0_f32, LINE);
-    visuals.extreme_bg_color = BG;
-    visuals.text_edit_bg_color = Some(RAISED);
-    visuals.faint_bg_color = RAISED;
-    visuals.selection.bg_fill = Color32::from_rgb(43, 80, 68);
-    visuals.selection.stroke = egui::Stroke::new(1.0_f32, ACCENT);
-    visuals.widgets.inactive.bg_fill = RAISED;
-    visuals.widgets.inactive.weak_bg_fill = RAISED;
-    visuals.widgets.hovered.bg_fill = Color32::from_rgb(53, 64, 64);
-    visuals.widgets.hovered.weak_bg_fill = visuals.widgets.hovered.bg_fill;
-    style.visuals = visuals;
-    style.spacing.item_spacing = egui::vec2(8.0, 8.0);
-    style.spacing.button_padding = egui::vec2(9.0, 5.0);
-    style
-        .text_styles
-        .insert(egui::TextStyle::Body, egui::FontId::proportional(15.0));
-    style
-        .text_styles
-        .insert(egui::TextStyle::Button, egui::FontId::proportional(14.0));
-    style
-        .text_styles
-        .insert(egui::TextStyle::Heading, egui::FontId::proportional(25.0));
-    ctx.set_style(style);
+    toggle
 }
 
-fn left_panel(id: &'static str, ctx: &Context, add: impl FnOnce(&mut Ui)) {
+fn left_panel(id: &'static str, ctx: &Context, grain: egui::TextureId, add: impl FnOnce(&mut Ui)) {
     egui::SidePanel::left(id)
-        .exact_width(238.0)
+        .exact_width(230.0)
         .resizable(false)
-        .frame(
-            Frame::new()
-                .fill(SURFACE)
-                .inner_margin(egui::Margin::same(15)),
-        )
+        .frame(Frame::new().fill(GOLD).inner_margin(egui::Margin::same(20)))
         .show(ctx, |ui| {
+            ui.painter().add(theme::paper(ui, grain, ui.clip_rect()));
             ScrollArea::vertical().show(ui, add);
         });
 }
 
-fn right_panel(id: &'static str, ctx: &Context, add: impl FnOnce(&mut Ui)) {
+fn right_panel(id: &'static str, ctx: &Context, grain: egui::TextureId, add: impl FnOnce(&mut Ui)) {
+    let max_width = (ctx.content_rect().width() - 230.0 - 348.0).clamp(300.0, 480.0);
     egui::SidePanel::right(id)
-        .default_width(343.0)
-        .width_range(300.0..=480.0)
+        .default_width(322.0)
+        .width_range(300.0..=max_width)
         .resizable(true)
-        .frame(
-            Frame::new()
-                .fill(SURFACE)
-                .inner_margin(egui::Margin::same(16)),
-        )
+        .frame(Frame::new().fill(GOLD).inner_margin(egui::Margin::same(20)))
         .show(ctx, |ui| {
+            ui.set_min_width(ui.max_rect().width());
+            ui.painter().add(theme::paper(ui, grain, ui.clip_rect()));
             ScrollArea::vertical().show(ui, add);
         });
 }
 
-fn center(ctx: &Context, add: impl FnOnce(&mut Ui)) {
+fn center(ctx: &Context, grain: egui::TextureId, add: impl FnOnce(&mut Ui)) {
     egui::CentralPanel::default()
-        .frame(Frame::new().fill(BG).inner_margin(egui::Margin::same(19)))
-        .show(ctx, add);
+        .frame(Frame::new().fill(BG).inner_margin(egui::Margin::same(20)))
+        .show(ctx, |ui| {
+            ui.painter().add(theme::paper(ui, grain, ui.clip_rect()));
+            add(ui);
+        });
+}
+
+fn search_field(ui: &mut Ui, query: &mut String, placeholder: &str) -> egui::Response {
+    let width = (ui.available_width() - 160.0).clamp(85.0, 206.0);
+    let response = ui.add(
+        egui::TextEdit::singleline(query)
+            .hint_text(placeholder)
+            .desired_width(width)
+            .margin(egui::Margin {
+                left: 27,
+                right: 7,
+                top: 4,
+                bottom: 4,
+            }),
+    );
+    let center = egui::pos2(response.rect.left() + 12.0, response.rect.center().y - 1.0);
+    let stroke = egui::Stroke::new(1.5_f32, if response.has_focus() { RULE } else { MUTED });
+    ui.painter().circle_stroke(center, 4.4, stroke);
+    ui.painter().line_segment(
+        [center + egui::vec2(3.2, 3.2), center + egui::vec2(6.3, 6.3)],
+        stroke,
+    );
+    response
 }
 
 fn muted(ui: &mut Ui, text: impl Into<String>) {
@@ -505,11 +529,22 @@ fn muted(ui: &mut Ui, text: impl Into<String>) {
 }
 
 fn caption(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).size(15.0).strong().color(ACCENT));
+    ui.label(
+        RichText::new(text)
+            .font(theme::display_font(16.0))
+            .color(ACCENT),
+    );
 }
 
 fn action(ui: &mut Ui, enabled: bool, text: &str) -> bool {
-    let button = egui::Button::new(RichText::new(text).color(BG).strong()).fill(ACCENT);
+    let color = if enabled { TEXT } else { MUTED };
+    let fill = if enabled { BUTTON_ORANGE } else { SURFACE };
+    let button = egui::Button::new(
+        RichText::new(text)
+            .color(color)
+            .font(theme::display_font(14.0)),
+    )
+    .fill(fill);
     ui.add_enabled(enabled, button).clicked()
 }
 

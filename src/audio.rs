@@ -1,7 +1,10 @@
-use crate::scope::{Source, check_cancel, extension, key};
+use crate::sample_tags::{MetadataWords, categories, found, tokens};
+use crate::scope::{Source, check_cancel, extension};
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
-use std::io::ErrorKind;
+use std::fs::File;
+use std::io::{self, BufReader, ErrorKind, Read, Seek, SeekFrom};
+use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use symphonia::core::{
@@ -9,55 +12,26 @@ use symphonia::core::{
     codecs::DecoderOptions,
     errors::Error,
     formats::FormatOptions,
-    io::MediaSourceStream,
+    io::{MediaSource, MediaSourceStream},
     meta::{Metadata, MetadataOptions},
     probe::Hint,
 };
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Analysis {
+    #[serde(default)]
+    pub(crate) revision: u32,
     pub seconds: Option<f64>,
     pub tags: Vec<String>,
     pub error: Option<String>,
 }
 
-const INSTRUMENTS: &[(&str, &str)] = &[
-    ("킥", "kick bassdrum 킥"),
-    ("스네어", "snare clap rimshot 스네어 클랩"),
-    ("하이햇", "hihat hi-hat hi_hat 하이햇"),
-    ("퍼커션", "perc percussion shaker tambourine conga"),
-    ("드럼", "drum drums drumkit 드럼"),
-    ("베이스", "bass 808 베이스"),
-    ("신스", "synth synths lead pad arpeggio 신스"),
-    ("피아노·건반", "keys keyboard piano rhodes organ 피아노"),
-    ("기타", "guitar guitars gtr 기타"),
-    ("보컬", "vocal vocals vox voice acapella 보컬"),
-    ("현악기", "strings string violin cello"),
-    ("효과음", "fx sfx riser impact foley"),
-];
-
-const GENRES: &[(&str, &str)] = &[
-    (
-        "힙합",
-        "hiphop hip-hop hip_hop boombap boom-bap boom_bap 힙합",
-    ),
-    ("트랩", "trap drill 트랩"),
-    ("하우스", "house deep-house 하우스"),
-    ("테크노", "techno 테크노"),
-    ("드럼 앤 베이스", "dnb drum-and-bass jungle"),
-    ("R&B", "rnb r&b r-b rhythm-and-blues"),
-    ("재즈", "jazz 재즈"),
-    ("로파이", "lofi lo-fi lo_fi 로파이"),
-    ("팝", "pop kpop k-pop 팝"),
-    ("록", "rock punk metal 록"),
-    ("앰비언트", "ambient cinematic"),
-    ("UK 개러지", "ukg uk-garage"),
-];
+pub(crate) const ANALYSIS_REVISION: u32 = 3;
 
 pub fn analyze(source: &Source, cancel: &AtomicBool) -> Result<Analysis> {
     check_cancel(cancel)?;
-    let file = source.open()?;
-    let stream = MediaSourceStream::new(Box::new(file), Default::default());
+    let input = AudioInput::open(source)?;
+    let stream = MediaSourceStream::new(Box::new(input), Default::default());
     let mut hint = Hint::new();
     hint.with_extension(&extension(&source.path));
     let mut probed = symphonia::default::get_probe().format(
@@ -66,7 +40,7 @@ pub fn analyze(source: &Source, cancel: &AtomicBool) -> Result<Analysis> {
         &FormatOptions::default(),
         &MetadataOptions::default(),
     )?;
-    let mut embedded = Vec::new();
+    let mut embedded = MetadataWords::default();
     if let Some(metadata) = probed.metadata.get() {
         collect_metadata(metadata, &mut embedded);
     }
@@ -109,19 +83,20 @@ pub fn analyze(source: &Source, cancel: &AtomicBool) -> Result<Analysis> {
             break;
         }
     }
-    ensure!(signal.frames > 0 && rate > 0, "디코딩할 오디오가 없습니다.");
+    ensure!(signal.frames > 0 && rate > 0, "디코딩할 오디오 없음");
     collect_metadata(format.metadata(), &mut embedded);
     let seconds = frames.unwrap_or(signal.frames) as f64 / f64::from(rate);
     let mut tags = categories(&source.path, &source.scope.path, &embedded);
     let words = tokens(&format!(
         "{} {}",
         relative_name(&source.path, &source.scope.path),
-        embedded.join(" ")
+        embedded.text.join(" ")
     ));
     tags.push(length_tag(seconds));
     tags.push(signal.brightness(rate));
     tags.push(signal.shape(seconds, &words));
     Ok(Analysis {
+        revision: ANALYSIS_REVISION,
         seconds: Some(seconds),
         tags,
         error: None,
@@ -130,33 +105,126 @@ pub fn analyze(source: &Source, cancel: &AtomicBool) -> Result<Analysis> {
 
 pub fn unavailable(source: &Source, error: &anyhow::Error) -> Analysis {
     Analysis {
-        tags: categories(&source.path, &source.scope.path, &[]),
+        revision: ANALYSIS_REVISION,
+        tags: categories(&source.path, &source.scope.path, &MetadataWords::default()),
         error: Some(format!("{error:#}")),
         seconds: None,
     }
 }
 
-fn collect_metadata(metadata: Metadata<'_>, values: &mut Vec<String>) {
+pub fn decode_preview(source: &Source) -> Result<impl rodio::Source + Send + 'static> {
+    let input = AudioInput::open(source)?;
+    let length = input.length;
+    Ok(rodio::Decoder::builder()
+        .with_data(BufReader::new(input))
+        .with_byte_len(length)
+        .with_seekable(true)
+        .build()?)
+}
+
+struct AudioInput {
+    file: File,
+    length: u64,
+    empty_wav_lists: Vec<u64>,
+}
+
+impl AudioInput {
+    fn open(source: &Source) -> Result<Self> {
+        let file = source.open()?;
+        let length = file.metadata()?.len();
+        let empty_wav_lists = if matches!(extension(&source.path).as_str(), "wav" | "wave") {
+            empty_wav_list_offsets(&file, length)?
+        } else {
+            Vec::new()
+        };
+        Ok(Self {
+            file,
+            length,
+            empty_wav_lists,
+        })
+    }
+}
+
+fn empty_wav_list_offsets(file: &File, length: u64) -> io::Result<Vec<u64>> {
+    let mut offsets = Vec::new();
+    if length < 12 {
+        return Ok(offsets);
+    }
+    let mut header = [0u8; 12];
+    file.read_exact_at(&mut header, 0)?;
+    if &header[..4] != b"RIFF" || &header[8..] != b"WAVE" {
+        return Ok(offsets);
+    }
+    let riff_end = length.min(8 + u64::from(u32::from_le_bytes(header[4..8].try_into().unwrap())));
+    let mut position = 12;
+    let mut chunk = [0u8; 8];
+    while position + 8 <= riff_end {
+        file.read_exact_at(&mut chunk, position)?;
+        let size = u64::from(u32::from_le_bytes(chunk[4..].try_into().unwrap()));
+        if &chunk[..4] == b"LIST" && size == 0 {
+            offsets.push(position);
+        }
+        position += 8 + size + (size & 1);
+    }
+    Ok(offsets)
+}
+
+impl Read for AudioInput {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if self.empty_wav_lists.is_empty() {
+            return self.file.read(buffer);
+        }
+        let start = self.file.stream_position()?;
+        let read = self.file.read(buffer)?;
+        let end = start + read as u64;
+        for &offset in &self.empty_wav_lists {
+            // Expose an empty LIST as padding to the decoders without rewriting the WAV.
+            for position in start.max(offset)..end.min(offset + 4) {
+                buffer[(position - start) as usize] = b"JUNK"[(position - offset) as usize];
+            }
+        }
+        Ok(read)
+    }
+}
+
+impl Seek for AudioInput {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        self.file.seek(position)
+    }
+}
+
+impl MediaSource for AudioInput {
+    fn is_seekable(&self) -> bool {
+        true
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        Some(self.length)
+    }
+}
+
+fn collect_metadata(metadata: Metadata<'_>, values: &mut MetadataWords) {
     use symphonia::core::meta::StandardTagKey as Tag;
     if let Some(revision) = metadata.current() {
         for tag in revision.tags().iter().take(64) {
-            if matches!(
+            let field = tag.key.to_ascii_lowercase();
+            let value = || -> String { tag.value.to_string().chars().take(250).collect() };
+            if tag.std_key == Some(Tag::Genre) || field == "genre" {
+                values.genres.push(value());
+            } else if matches!(field.as_str(), "instrument" | "instruments") {
+                values.instruments.push(value());
+            } else if matches!(
                 tag.std_key,
                 Some(
                     Tag::Album
                         | Tag::Comment
                         | Tag::ContentGroup
                         | Tag::Description
-                        | Tag::Genre
-                        | Tag::PodcastCategory
-                        | Tag::PodcastKeywords
                         | Tag::TrackTitle
                 )
-            ) || matches!(
-                tag.key.to_ascii_lowercase().as_str(),
-                "instrument" | "genre" | "keywords" | "category"
-            ) {
-                values.push(tag.value.to_string().chars().take(250).collect());
+            ) || matches!(field.as_str(), "keywords" | "category")
+            {
+                values.text.push(value());
             }
         }
     }
@@ -169,52 +237,6 @@ fn relative_name(path: &Path, root: &Path) -> String {
         crate::scope::name(root),
         relative.to_string_lossy()
     )
-}
-
-fn tokens(value: &str) -> String {
-    let normalized = key(value);
-    let words = normalized
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|part| !part.is_empty());
-    format!(" {} ", words.collect::<Vec<_>>().join(" "))
-}
-
-fn found(words: &str, value: &str) -> bool {
-    words.contains(&tokens(value))
-}
-
-fn category<'a>(primary: &str, secondary: &str, options: &[(&'a str, &str)]) -> &'a str {
-    for words in [primary, secondary] {
-        let mut matches = options
-            .iter()
-            .filter(|(_, aliases)| aliases.split_whitespace().any(|alias| found(words, alias)));
-        if let Some((label, _)) = matches.next() {
-            if matches.next().is_none() {
-                return label;
-            }
-            return "미분류";
-        }
-    }
-    "미분류"
-}
-
-fn categories(path: &Path, root: &Path, embedded: &[String]) -> Vec<String> {
-    let metadata = tokens(&embedded.join(" "));
-    let file = tokens(&crate::scope::name(path));
-    let parent = tokens(&relative_name(path.parent().unwrap_or(root), root));
-    let mut tags = Vec::new();
-    for (prefix, options) in [("악기", INSTRUMENTS), ("장르", GENRES)] {
-        let label = if options
-            .iter()
-            .any(|(_, aliases)| aliases.split_whitespace().any(|alias| found(&file, alias)))
-        {
-            category(&file, "", options)
-        } else {
-            category(&metadata, &parent, options)
-        };
-        tags.push(format!("{prefix} · {label}"));
-    }
-    tags
 }
 
 fn length_tag(seconds: f64) -> String {
@@ -289,8 +311,10 @@ impl Signal {
     }
 
     fn shape(&self, seconds: f64, words: &str) -> String {
-        let loop_name = ["loop", "루프"].iter().any(|value| found(words, value));
-        let shot_name = ["oneshot", "one-shot", "원샷"]
+        let loop_name = ["loop", "loops", "drumloop", "drumloops", "루프"]
+            .iter()
+            .any(|value| found(words, value));
+        let shot_name = ["oneshot", "oneshots", "one shot", "one shots", "원샷"]
             .iter()
             .any(|value| found(words, value));
         let peak = self.envelope.iter().copied().fold(0.0f64, f64::max);

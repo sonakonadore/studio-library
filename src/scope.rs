@@ -45,10 +45,10 @@ impl Scope {
         let selected = fs::symlink_metadata(path).with_context(|| path.display().to_string())?;
         ensure!(
             selected.is_file() || selected.is_dir(),
-            "일반 파일 또는 폴더를 선택하세요."
+            "일반 파일/폴더 선택 필요"
         );
         let path = path.canonicalize()?;
-        ensure!(path.to_str().is_some(), "UTF-8 경로를 선택하세요.");
+        ensure!(path.to_str().is_some(), "UTF-8 경로 선택 필요");
         Ok(Self {
             path,
             device: selected.dev(),
@@ -67,15 +67,15 @@ impl Scope {
         );
         let mut current = self.path.clone();
         let mut meta = fs::symlink_metadata(&current)
-            .with_context(|| format!("선택 경로에 접근할 수 없음 · {}", current.display()))?;
+            .with_context(|| format!("선택 경로 접근 불가 · {}", current.display()))?;
         ensure!(
             meta.dev() == self.device && meta.ino() == self.inode && !meta.is_symlink(),
-            "선택 경로가 바뀌었습니다. 다시 선택하세요. · {}",
+            "선택 경로 변경 · 다시 선택 · {}",
             current.display()
         );
         ensure!(
             current.canonicalize()? == self.path,
-            "선택 경로의 상위 폴더가 바뀌었습니다. · {}",
+            "선택 경로의 상위 폴더 변경 · {}",
             current.display()
         );
         for part in relative.components() {
@@ -116,7 +116,7 @@ impl Source {
 
     pub fn open(&self) -> Result<File> {
         let before = self.metadata()?;
-        ensure!(before.is_file(), "일반 파일을 선택하세요.");
+        ensure!(before.is_file(), "일반 파일 선택 필요");
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
@@ -126,7 +126,7 @@ impl Source {
             after.is_file()
                 && Stamp::from(&before) == Stamp::from(&after)
                 && Stamp::from(&self.metadata()?) == Stamp::from(&after),
-            "파일이 바뀌었습니다. · {}",
+            "파일 변경 · {}",
             self.path.display()
         );
         Ok(file)
@@ -178,7 +178,7 @@ pub fn safe_component(value: &str) -> Result<&str> {
             && value.len() <= 240
             && !value.contains(['/', '\\', ':'])
             && !value.chars().any(char::is_control),
-        "폴더 이름에 사용할 수 없습니다. · {value}"
+        "사용할 수 없는 폴더 이름 · {value}"
     );
     Ok(value)
 }

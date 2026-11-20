@@ -27,12 +27,12 @@ pub fn media_help(ext: &str) -> &'static str {
             "Fender Studio Pro · File → Save to New Folder · .song 옆의 Media·History 폴더 보존"
         }
         "cpr" => "Cubase · File → Back up Project",
-        "rpp" => "REAPER · Save Project As에서 프로젝트 폴더와 미디어 복사 옵션 사용",
+        "rpp" => "REAPER · Save Project As → 프로젝트 폴더 및 미디어 복사 옵션 선택",
         "flp" => "FL Studio · File → Export → Zipped loop package",
-        "ptx" => "Pro Tools · File → Save Copy In에서 오디오 파일 포함",
-        "band" => "GarageBand · 프로젝트를 저장하고 Finder에서 .band 패키지 전체 확인",
+        "ptx" => "Pro Tools · File → Save Copy In → 오디오 파일 포함",
+        "band" => "GarageBand · 프로젝트 저장 → Finder에서 .band 패키지 전체 확인",
         "bwproject" => "Bitwig Studio · File → Collect and Save",
-        _ => "사용 중인 DAW에서 외부 미디어를 프로젝트 폴더에 수집한 후 복사하세요.",
+        _ => "DAW에서 외부 미디어를 프로젝트 폴더로 수집 → 복사",
     }
 }
 
@@ -62,17 +62,17 @@ impl Rule {
             RuleKind::Extension => pattern.trim().trim_start_matches('.'),
             RuleKind::FolderName => pattern.trim(),
         };
-        ensure!(!daw.trim().is_empty(), "DAW 이름을 입력하세요.");
+        ensure!(!daw.trim().is_empty(), "DAW 이름 입력 필요");
         ensure!(
             !pattern.is_empty()
                 && !pattern.contains(['/', '\\', ':'])
                 && !pattern.chars().any(char::is_control),
-            "유효한 규칙을 입력하세요."
+            "탐색 규칙 형식 오류"
         );
         if kind == RuleKind::Extension {
             ensure!(
                 !pattern.contains(['.', '*', '?']) && !pattern.chars().any(char::is_whitespace),
-                "확장자 하나를 입력하세요. 예: als"
+                "확장자 1개 입력 (예시 .als)"
             );
         }
         Ok(Self {
@@ -357,7 +357,7 @@ fn project(
                     nearby.push(source.scope.source(entry.into_path()));
                     if nearby.len() >= 200 {
                         scan.warnings
-                            .push(format!("오디오 후보 200개까지 표시 · {}", path.display()));
+                            .push(format!("오디오 후보 최대 200개 표시 · {}", path.display()));
                         break;
                     }
                 }

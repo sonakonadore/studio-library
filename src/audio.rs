@@ -83,7 +83,7 @@ pub fn analyze(source: &Source, cancel: &AtomicBool) -> Result<Analysis> {
             break;
         }
     }
-    ensure!(signal.frames > 0 && rate > 0, "디코딩할 오디오가 없습니다.");
+    ensure!(signal.frames > 0 && rate > 0, "디코딩할 오디오 없음");
     collect_metadata(format.metadata(), &mut embedded);
     let seconds = frames.unwrap_or(signal.frames) as f64 / f64::from(rate);
     let mut tags = categories(&source.path, &source.scope.path, &embedded);

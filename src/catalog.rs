@@ -149,7 +149,7 @@ impl Store {
         cancel: &AtomicBool,
         mut progress: impl FnMut(usize, usize),
     ) -> Result<SampleScan> {
-        ensure!(root.directory, "Splice 폴더를 선택하세요.");
+        ensure!(root.directory, "Splice 폴더 선택 필요");
         root.check(&root.path)?;
         let previous: BTreeMap<PathBuf, (Stamp, u32)> = self
             .samples(root)?
@@ -208,10 +208,7 @@ impl Store {
                     Ok(meta) if Stamp::from(&meta) == stamp => {
                         changed.push((source.path, stamp, analysis))
                     }
-                    _ => warnings.push(format!(
-                        "스캔 중 파일이 바뀌었습니다. · {}",
-                        source.path.display()
-                    )),
+                    _ => warnings.push(format!("탐색 중 파일 변경 · {}", source.path.display())),
                 }
             }
             progress(seen.len(), changed.len());
@@ -266,5 +263,5 @@ pub fn matches_tags(tags: &[String], filters: &[String]) -> bool {
 }
 
 fn path_text(path: &Path) -> Result<&str> {
-    path.to_str().context("UTF-8 경로를 선택하세요.")
+    path.to_str().context("UTF-8 경로 선택 필요")
 }

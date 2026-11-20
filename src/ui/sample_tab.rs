@@ -54,10 +54,7 @@ impl Studio {
         if let Some(root) = &self.settings.samples {
             path_label(ui, &root.path);
         } else {
-            muted(
-                ui,
-                "Splice에서 다운로드한 샘플이 들어 있는 폴더를 선택하세요.",
-            );
+            muted(ui, "Splice 다운로드 폴더 선택");
         }
         if action(
             ui,
@@ -68,7 +65,7 @@ impl Studio {
                 "Choose folder"
             },
         ) {
-            match folder("Splice 다운로드 폴더를 선택하세요.") {
+            match folder("Splice 다운로드 폴더 선택") {
                 Ok(Some(scope)) => {
                     if self.save_settings(|settings| settings.samples = Some(scope)) {
                         self.player.stop();
@@ -99,7 +96,7 @@ impl Studio {
         {
             self.player.stop();
             self.replace_samples(Vec::new());
-            self.status = "샘플 폴더 등록을 해제했어요.".into();
+            self.status = "샘플 폴더 등록 해제".into();
         }
         ui.separator();
         caption(ui, "Virtual folders");
@@ -120,7 +117,7 @@ impl Studio {
             ui.horizontal(|ui| {
                 if ui
                     .add_enabled(self.ready(), egui::Button::new("×").small())
-                    .on_hover_text("이 가상 폴더를 삭제합니다.")
+                    .on_hover_text("가상 폴더 삭제")
                     .clicked()
                     && self.save_settings(|settings| {
                         settings.virtual_folders.remove(index);
@@ -149,7 +146,7 @@ impl Studio {
         let save_enabled = self.ready() && !self.samples.filters.is_empty();
         if ui
             .add_enabled(save_enabled, egui::Button::new("Save filters as folder"))
-            .on_disabled_hover_text("Filter by tag에서 태그를 먼저 골라 주세요.")
+            .on_disabled_hover_text("Filter by tag에서 태그 선택")
             .clicked()
         {
             self.samples.show_folder_form = !self.samples.show_folder_form;
@@ -172,9 +169,7 @@ impl Studio {
                     .iter()
                     .any(|folder| key(&folder.name) == key(&name));
                 if name.is_empty() || duplicate {
-                    self.error(anyhow::anyhow!(
-                        "아직 사용하지 않은 폴더 이름을 입력하세요."
-                    ));
+                    self.error(anyhow::anyhow!("중복 없는 가상 폴더 이름 입력"));
                 } else if self.save_settings(|settings| {
                     settings.virtual_folders.push(VirtualFolder {
                         name: name.clone(),
@@ -184,7 +179,7 @@ impl Studio {
                     self.samples.active_folder = Some(name);
                     self.samples.folder_name.clear();
                     self.samples.show_folder_form = false;
-                    self.status = "가상 폴더를 저장했어요.".into();
+                    self.status = "가상 폴더 저장 완료".into();
                 }
             }
         }
@@ -194,7 +189,7 @@ impl Studio {
         ui.heading("Browse samples");
         muted(ui, "WAV · AIFF · MP3");
         ui.horizontal_wrapped(|ui| {
-            search_field(ui, &mut self.samples.query, "파일 이름으로 검색");
+            search_field(ui, &mut self.samples.query, "파일명 검색");
             let available: BTreeSet<_> = self
                 .samples
                 .rows
@@ -206,7 +201,7 @@ impl Studio {
                 .height(290.0)
                 .show_ui(ui, |ui| {
                     if available.is_empty() {
-                        muted(ui, "표시할 태그가 없어요.");
+                        muted(ui, "표시할 태그 없음");
                     }
                     for tag in available {
                         if !matches_tags(&self.samples.filters, std::slice::from_ref(tag))
@@ -279,9 +274,9 @@ impl Studio {
             muted(
                 ui,
                 if self.settings.samples.is_some() {
-                    "조건에 맞는 샘플이 없어요."
+                    "조건에 맞는 샘플 없음"
                 } else {
-                    "Choose folder로 Splice 다운로드 폴더를 지정하세요."
+                    "Choose folder에서 Splice 다운로드 폴더 지정"
                 },
             );
         }
@@ -295,7 +290,7 @@ impl Studio {
                         let mut marked = self.samples.selected.contains(path);
                         if ui
                             .checkbox(&mut marked, "")
-                            .on_hover_text("이 샘플을 복사 목록에 추가합니다.")
+                            .on_hover_text("복사 대상 선택")
                             .changed()
                         {
                             if marked {
@@ -330,7 +325,7 @@ impl Studio {
                                     .size(14.0)
                                     .color(TEXT),
                             )
-                            .on_hover_text("샘플의 재생 길이");
+                            .on_hover_text("재생 길이");
                         });
                     });
                     ui.horizontal(|ui| {
@@ -395,17 +390,14 @@ impl Studio {
             .find(|row| Some(&row.source.path) == self.samples.focus.as_ref())
             .cloned()
         else {
-            muted(
-                ui,
-                "목록에서 샘플을 고른 뒤 Play를 누르면 미리 들을 수 있어요.",
-            );
+            muted(ui, "샘플 선택 → Play로 미리듣기");
             return;
         };
         ui.heading(name(&row.source.path));
         path_label(ui, &row.source.path);
         muted(ui, format!("Duration  {}", duration(row.analysis.seconds)));
         if let Some(error) = &row.analysis.error {
-            ui.label(RichText::new("이 샘플은 분석하지 못했어요.").color(WARN))
+            ui.label(RichText::new("샘플 분석 실패").color(WARN))
                 .on_hover_text(error);
         }
         ui.horizontal_wrapped(|ui| {
@@ -427,7 +419,7 @@ impl Studio {
                 "Suggested tags"
             },
         );
-        muted(ui, "태그를 쉼표나 줄바꿈으로 나눠서 입력하세요.");
+        muted(ui, "쉼표/줄바꿈으로 태그 구분");
         ui.add(
             egui::TextEdit::multiline(&mut self.samples.draft_tags)
                 .desired_rows(4)
@@ -442,7 +434,7 @@ impl Studio {
                 match self.store.tag_sample(&row.source, &tags) {
                     Ok(()) => {
                         self.change_tags(&row.source, tags, true);
-                        self.status = "태그를 저장했어요.".into();
+                        self.status = "태그 저장 완료".into();
                     }
                     Err(error) => self.error(error),
                 }
@@ -457,7 +449,7 @@ impl Studio {
                 match self.store.reset_sample_tags(&row.source) {
                     Ok(()) => {
                         self.change_tags(&row.source, row.analysis.tags, false);
-                        self.status = "제안 태그로 되돌렸어요.".into();
+                        self.status = "제안 태그 복원 완료".into();
                     }
                     Err(error) => self.error(error),
                 }
@@ -486,7 +478,7 @@ impl Studio {
             .filter(|row| self.samples.selected.contains(&row.source.path))
             .map(|row| row.source.clone())
             .collect::<Vec<_>>();
-        match folder("선택한 샘플을 복사할 폴더를 골라 주세요.") {
+        match folder("샘플 복사 대상 폴더 선택") {
             Ok(Some(destination)) => {
                 if self
                     .settings
@@ -494,9 +486,7 @@ impl Studio {
                     .as_ref()
                     .is_some_and(|root| root.path == destination.path)
                 {
-                    self.error(anyhow::anyhow!(
-                        "Splice 폴더와 다른 개인 폴더를 선택하세요."
-                    ));
+                    self.error(anyhow::anyhow!("Splice 폴더 외의 개인 폴더 선택"));
                     return;
                 }
                 self.job = Some(Job::start(

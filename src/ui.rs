@@ -132,7 +132,7 @@ impl Studio {
 
     fn error(&mut self, error: anyhow::Error) {
         self.status = if error.is::<Cancelled>() {
-            "작업을 취소했어요.".into()
+            "작업 취소".into()
         } else {
             format!("실패 · {error:#}")
         };
@@ -162,7 +162,7 @@ impl Studio {
                 Ok(Event::Done(outcome)) => break outcome,
                 Err(std::sync::mpsc::TryRecvError::Empty) => return,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    break Err(anyhow::anyhow!("작업이 중단됐어요. 다시 시도해 주세요."));
+                    break Err(anyhow::anyhow!("작업 중단 · 다시 시도"));
                 }
             }
         };
@@ -198,7 +198,7 @@ impl Studio {
                 self.replace_samples(scan.rows);
             }
             Ok(Outcome::Plan(plan)) => {
-                self.status = "복사할 원본과 보관 위치를 확인해 주세요.".into();
+                self.status = "원본, 복사 위치 확인".into();
                 self.plan = Some(plan);
             }
             Ok(Outcome::Copy(report)) => {
@@ -212,10 +212,7 @@ impl Studio {
                 {
                     self.status = message;
                 } else {
-                    self.status = format!(
-                        "{message} · 복사 위치를 저장하지 못했어요. · {}",
-                        self.status
-                    );
+                    self.status = format!("{message} · 복사 위치 저장 실패 · {}", self.status);
                 }
             }
             Err(error) => self.error(error),
@@ -335,7 +332,7 @@ impl Studio {
             egui::Modal::new(egui::Id::new("approved_copy")).show(ctx, |ui| {
                 ui.set_width(650.0);
                 ui.heading("Review copy plan");
-                muted(ui, "원본을 그대로 두고 아래 위치에 복사합니다.");
+                muted(ui, "원본 보존 · 아래 위치에 복사");
                 ui.label(format!("Destination  {}", plan.target().display()));
                 ui.label(
                     RichText::new(format!("Estimated size  {}", byte_count(plan.bytes())))
@@ -343,11 +340,8 @@ impl Studio {
                 );
                 if plan.skipped > 0 {
                     ui.label(
-                        RichText::new(format!(
-                            "링크 또는 특수 파일 {}개는 건너뜁니다.",
-                            plan.skipped
-                        ))
-                        .color(WARN),
+                        RichText::new(format!("링크/특수 파일 {}개 건너뜀", plan.skipped))
+                            .color(WARN),
                     );
                 }
                 ui.separator();
@@ -391,7 +385,7 @@ impl Studio {
                     Ok(Outcome::Copy(report))
                 }));
             } else if decline {
-                self.status = "복사를 취소했어요.".into();
+                self.status = "복사 취소".into();
             } else {
                 self.plan = Some(plan);
             }

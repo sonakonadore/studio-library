@@ -235,7 +235,18 @@ impl Studio {
                 ui.horizontal(|ui| {
                     theme::mark(ui);
                     ui.add_space(5.0);
-                    ui.label(RichText::new("Studio Library").font(theme::display_font(37.0)));
+                    let title = RichText::new("Studio Library").font(theme::display_font(37.0));
+                    let brand = ui
+                        .add(
+                            egui::Label::new(title)
+                                .selectable(false)
+                                .sense(egui::Sense::click()),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text("탭 전환 · Tab");
+                    if brand.clicked() {
+                        self.toggle_tab();
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         for (tab, label) in [(Tab::Samples, "Samples"), (Tab::Projects, "Projects")]
                         {
@@ -258,6 +269,13 @@ impl Studio {
                 ui.painter()
                     .set(grain, theme::paper(ui, self.paper_grain.id(), rect));
             });
+    }
+
+    fn toggle_tab(&mut self) {
+        self.tab = match self.tab {
+            Tab::Projects => Tab::Samples,
+            Tab::Samples => Tab::Projects,
+        };
     }
 
     fn footer(&mut self, ctx: &Context) {
@@ -403,6 +421,12 @@ impl eframe::App for Studio {
             job.cancel.store(true, Ordering::Relaxed);
             self.close_after_job = true;
         }
+        let dialog_open = self.plan.is_some()
+            || self.show_warnings
+            || (self.tab == Tab::Projects && self.projects.show_rules);
+        if !dialog_open && !egui::Popup::is_any_open(ctx) && take_tab_shortcut(ctx) {
+            self.toggle_tab();
+        }
         self.header(ctx);
         self.footer(ctx);
         match self.tab {
@@ -411,6 +435,36 @@ impl eframe::App for Studio {
         }
         self.dialogs(ctx);
     }
+}
+
+fn take_tab_shortcut(ctx: &Context) -> bool {
+    let (toggle, consumed) = ctx.input_mut(|input| {
+        let mut toggle = false;
+        let before = input.events.len();
+        input.events.retain(|event| {
+            if let egui::Event::Key {
+                key: egui::Key::Tab,
+                pressed: true,
+                repeat,
+                modifiers,
+                ..
+            } = event
+                && modifiers.is_none()
+            {
+                if !repeat {
+                    toggle = !toggle;
+                }
+                false
+            } else {
+                true
+            }
+        });
+        (toggle, input.events.len() != before)
+    });
+    if consumed {
+        ctx.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+    }
+    toggle
 }
 
 fn left_panel(id: &'static str, ctx: &Context, grain: egui::TextureId, add: impl FnOnce(&mut Ui)) {

@@ -132,11 +132,14 @@ impl Studio {
             self.projects.show_rules = true;
         }
         ui.add_space(6.0);
-        egui::CollapsingHeader::new("Supported formats").show(ui, |ui| {
-            for (daw, ext) in FORMATS {
-                muted(ui, format!("{daw}  .{ext}"));
-            }
-        });
+        egui::CollapsingHeader::new("Supported formats")
+            .default_open(true)
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 5.0;
+                for (daw, ext) in FORMATS {
+                    muted(ui, format!("{daw}  .{ext}"));
+                }
+            });
     }
 
     fn rule_dialog(&mut self, ctx: &Context) {
@@ -263,11 +266,8 @@ impl Studio {
         ui.heading("Discovered projects");
         muted(ui, "곡별 묶음, 버전, 원본 위치를 확인할 수 있어요.");
         ui.horizontal_wrapped(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut self.projects.query)
-                    .hint_text("곡 이름이나 프로젝트 파일명으로 검색")
-                    .desired_width(210.0),
-            );
+            search_field(ui, &mut self.projects.query, "프로젝트 검색")
+                .on_hover_text("곡 이름, 곡 묶음, 프로젝트 파일명으로 검색합니다.");
             ui.checkbox(&mut self.projects.review_only, "Needs review");
         });
         ui.separator();

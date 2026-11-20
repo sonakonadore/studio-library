@@ -194,11 +194,7 @@ impl Studio {
         ui.heading("Browse samples");
         muted(ui, "WAV · AIFF · MP3");
         ui.horizontal_wrapped(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut self.samples.query)
-                    .hint_text("파일 이름으로 검색")
-                    .desired_width(210.0),
-            );
+            search_field(ui, &mut self.samples.query, "파일 이름으로 검색");
             let available: BTreeSet<_> = self
                 .samples
                 .rows
@@ -250,15 +246,19 @@ impl Studio {
         let mut choose = None;
         let mut copy = false;
         let ready = self.ready();
+        let summary = format!(
+            "{}개 표시 · {}개 선택",
+            rows.len(),
+            self.samples.selected.len()
+        );
+        let compact = ui.available_width() < 380.0;
+        if compact {
+            muted(ui, &summary);
+        }
         ui.horizontal_wrapped(|ui| {
-            muted(
-                ui,
-                format!(
-                    "{}개 표시 · {}개 선택",
-                    rows.len(),
-                    self.samples.selected.len()
-                ),
-            );
+            if !compact {
+                muted(ui, &summary);
+            }
             copy = action(
                 ui,
                 ready && !self.samples.selected.is_empty(),

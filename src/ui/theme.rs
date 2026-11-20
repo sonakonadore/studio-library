@@ -1,17 +1,18 @@
 use eframe::egui::{self, Color32, Context, FontFamily, FontId, Rect, Shape, Stroke, Ui};
 
-pub(super) const BG: Color32 = Color32::from_rgb(250, 242, 226);
-pub(super) const SURFACE: Color32 = Color32::from_rgb(242, 230, 208);
-pub(super) const RAISED: Color32 = Color32::from_rgb(255, 250, 239);
-pub(super) const LINE: Color32 = Color32::from_rgb(190, 161, 116);
-pub(super) const TEXT: Color32 = Color32::from_rgb(47, 38, 26);
-pub(super) const MUTED: Color32 = Color32::from_rgb(101, 83, 59);
-pub(super) const ACCENT: Color32 = Color32::from_rgb(161, 61, 29);
-pub(super) const WARN: Color32 = ACCENT;
-pub(super) const GOLD: Color32 = Color32::from_rgb(244, 191, 82);
-const HIGHLIGHT: Color32 = Color32::from_rgb(244, 217, 160);
-const INTERACTION: Color32 = Color32::from_rgb(240, 207, 144);
-const TILE: usize = 160;
+pub(super) const BG: Color32 = Color32::from_rgb(249, 234, 207);
+pub(super) const SURFACE: Color32 = Color32::from_rgb(244, 223, 192);
+pub(super) const RAISED: Color32 = Color32::from_rgb(255, 243, 218);
+pub(super) const LINE: Color32 = Color32::from_rgb(147, 112, 64);
+pub(super) const RULE: Color32 = Color32::from_rgb(175, 76, 30);
+pub(super) const TEXT: Color32 = Color32::from_rgb(45, 32, 20);
+pub(super) const MUTED: Color32 = Color32::from_rgb(78, 52, 29);
+pub(super) const ACCENT: Color32 = Color32::from_rgb(171, 60, 16);
+pub(super) const WARN: Color32 = Color32::from_rgb(126, 39, 14);
+pub(super) const GOLD: Color32 = Color32::from_rgb(253, 190, 59);
+const HIGHLIGHT: Color32 = Color32::from_rgb(247, 214, 156);
+const INTERACTION: Color32 = Color32::from_rgb(240, 191, 117);
+const TILE: usize = 512;
 
 pub(super) fn display_font(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name("display".into()))
@@ -63,10 +64,10 @@ pub(super) fn style(ctx: &Context) {
     visuals.selection.stroke = Stroke::new(1.0_f32, ACCENT);
     visuals.warn_fg_color = WARN;
     visuals.error_fg_color = WARN;
-    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, LINE);
+    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, RULE);
     visuals.widgets.noninteractive.fg_stroke.color = MUTED;
     for (widget, fill, outline) in [
-        (&mut visuals.widgets.inactive, SURFACE, LINE),
+        (&mut visuals.widgets.inactive, RAISED, RULE),
         (&mut visuals.widgets.hovered, HIGHLIGHT, ACCENT),
         (&mut visuals.widgets.active, INTERACTION, ACCENT),
         (&mut visuals.widgets.open, HIGHLIGHT, ACCENT),
@@ -93,22 +94,32 @@ pub(super) fn style(ctx: &Context) {
         .insert(egui::TextStyle::Button, FontId::proportional(14.0));
     style
         .text_styles
-        .insert(egui::TextStyle::Heading, display_font(27.0));
+        .insert(egui::TextStyle::Heading, display_font(28.0));
     ctx.set_style(style);
 }
 
 pub(super) fn grain(ctx: &Context) -> egui::TextureHandle {
+    // Combine soft pulp variations with fine flecks, keeping grain out of the text itself.
     let mut seed = 0x7639_912b_u32;
+    let mut noise = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        (seed & 0xff) as f32 / 127.5 - 1.0
+    };
+    let coarse: Vec<_> = (0..8 * 8).map(|_| noise()).collect();
+    let fine: Vec<_> = (0..64 * 64).map(|_| noise()).collect();
     let pixels = (0..TILE * TILE)
-        .map(|_| {
-            seed ^= seed << 13;
-            seed ^= seed >> 17;
-            seed ^= seed << 5;
-            let fleck = (seed & 0xf) as u8;
-            if seed & 0x100 == 0 {
-                Color32::from_rgba_unmultiplied(91, 48, 16, fleck / 2)
+        .map(|index| {
+            let x = index % TILE;
+            let y = index / TILE;
+            let tone = 13.0 * paper_noise(&coarse, 8, x, y)
+                + 18.0 * paper_noise(&fine, 64, x, y)
+                + 20.0 * noise();
+            if tone < 0.0 {
+                Color32::from_rgba_unmultiplied(97, 48, 13, (tone.abs() * 0.75) as u8)
             } else {
-                Color32::from_rgba_unmultiplied(255, 253, 237, fleck)
+                Color32::from_rgba_unmultiplied(255, 249, 227, tone as u8)
             }
         })
         .collect();
@@ -119,10 +130,29 @@ pub(super) fn grain(ctx: &Context) -> egui::TextureHandle {
     )
 }
 
+fn paper_noise(grid: &[f32], width: usize, x: usize, y: usize) -> f32 {
+    let pitch = TILE / width;
+    let row = y / pitch;
+    let col = x / pitch;
+    let next_row = (row + 1) % width;
+    let next_col = (col + 1) % width;
+    let x_weight = (x % pitch) as f32 / pitch as f32;
+    let y_weight = (y % pitch) as f32 / pitch as f32;
+    let top = egui::lerp(
+        grid[row * width + col]..=grid[row * width + next_col],
+        x_weight,
+    );
+    let bottom = egui::lerp(
+        grid[next_row * width + col]..=grid[next_row * width + next_col],
+        x_weight,
+    );
+    egui::lerp(top..=bottom, y_weight)
+}
+
 pub(super) fn paper(ui: &Ui, texture: egui::TextureId, rect: Rect) -> Shape {
     let rect = rect.intersect(ui.clip_rect());
     let mut mesh = egui::Mesh::with_texture(texture);
-    let step = TILE as f32 / 1.55;
+    let step = TILE as f32 / 1.75;
     let uv = Rect::from_min_max(rect.min / step, rect.max / step);
     mesh.add_rect_with_uv(rect, uv, Color32::WHITE);
     Shape::mesh(mesh)

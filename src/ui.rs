@@ -18,7 +18,7 @@ mod sample_tab;
 
 mod theme;
 
-use theme::{ACCENT, BG, GOLD, LINE, MUTED, RAISED, SURFACE, TEXT, WARN};
+use theme::{ACCENT, BG, GOLD, LINE, MUTED, RAISED, RULE, SURFACE, TEXT, WARN};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -230,7 +230,7 @@ impl Studio {
             .frame(
                 Frame::new()
                     .fill(GOLD)
-                    .inner_margin(egui::Margin::symmetric(23, 15))
+                    .inner_margin(egui::Margin::symmetric(27, 17))
                     .stroke(egui::Stroke::new(1.0_f32, LINE)),
             )
             .show(ctx, |ui| {
@@ -238,7 +238,7 @@ impl Studio {
                 ui.horizontal(|ui| {
                     theme::mark(ui);
                     ui.add_space(5.0);
-                    ui.label(RichText::new("Studio Library").font(theme::display_font(36.0)));
+                    ui.label(RichText::new("Studio Library").font(theme::display_font(37.0)));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         for (tab, label) in [(Tab::Samples, "Samples"), (Tab::Projects, "Projects")]
                         {
@@ -246,16 +246,18 @@ impl Studio {
                             let label = RichText::new(label)
                                 .font(theme::display_font(14.0))
                                 .color(if selected { RAISED } else { TEXT });
-                            let button = egui::Button::new(label)
-                                .fill(if selected { ACCENT } else { RAISED })
-                                .stroke(egui::Stroke::NONE);
-                            if ui.add_sized([100.0, 32.0], button).clicked() {
+                            let button = egui::Button::new(label).fill(if selected {
+                                ACCENT
+                            } else {
+                                RAISED
+                            });
+                            if ui.add_sized([112.0, 34.0], button).clicked() {
                                 self.tab = tab;
                             }
                         }
                     });
                 });
-                let rect = ui.min_rect().expand2(egui::vec2(23.0, 15.0));
+                let rect = ui.min_rect().expand2(egui::vec2(27.0, 17.0));
                 ui.painter()
                     .set(grain, theme::paper(ui, self.paper_grain.id(), rect));
             });
@@ -263,13 +265,15 @@ impl Studio {
 
     fn footer(&mut self, ctx: &Context) {
         egui::TopBottomPanel::bottom("status")
+            .min_height(42.0)
             .frame(
                 Frame::new()
                     .fill(SURFACE)
                     .stroke(egui::Stroke::new(1.0_f32, LINE))
-                    .inner_margin(egui::Margin::symmetric(20, 9)),
+                    .inner_margin(egui::Margin::symmetric(23, 10)),
             )
             .show(ctx, |ui| {
+                let grain = ui.painter().add(egui::Shape::Noop);
                 ui.horizontal(|ui| {
                     if let Some(job) = &self.job {
                         ui.spinner();
@@ -306,6 +310,9 @@ impl Studio {
                         }
                     }
                 });
+                let rect = ui.min_rect().expand2(egui::vec2(23.0, 10.0));
+                ui.painter()
+                    .set(grain, theme::paper(ui, self.paper_grain.id(), rect));
             });
     }
 
@@ -414,42 +421,59 @@ impl eframe::App for Studio {
 
 fn left_panel(id: &'static str, ctx: &Context, grain: egui::TextureId, add: impl FnOnce(&mut Ui)) {
     egui::SidePanel::left(id)
-        .exact_width(238.0)
+        .exact_width(230.0)
         .resizable(false)
-        .frame(
-            Frame::new()
-                .fill(SURFACE)
-                .inner_margin(egui::Margin::same(15)),
-        )
+        .frame(Frame::new().fill(GOLD).inner_margin(egui::Margin::same(20)))
         .show(ctx, |ui| {
-            ui.painter().add(theme::paper(ui, grain, ui.max_rect()));
+            ui.painter().add(theme::paper(ui, grain, ui.clip_rect()));
             ScrollArea::vertical().show(ui, add);
         });
 }
 
 fn right_panel(id: &'static str, ctx: &Context, grain: egui::TextureId, add: impl FnOnce(&mut Ui)) {
+    let max_width = (ctx.content_rect().width() - 230.0 - 348.0).clamp(300.0, 480.0);
     egui::SidePanel::right(id)
-        .default_width(343.0)
-        .width_range(300.0..=480.0)
+        .default_width(322.0)
+        .width_range(300.0..=max_width)
         .resizable(true)
-        .frame(
-            Frame::new()
-                .fill(SURFACE)
-                .inner_margin(egui::Margin::same(16)),
-        )
+        .frame(Frame::new().fill(GOLD).inner_margin(egui::Margin::same(20)))
         .show(ctx, |ui| {
-            ui.painter().add(theme::paper(ui, grain, ui.max_rect()));
+            ui.set_min_width(ui.max_rect().width());
+            ui.painter().add(theme::paper(ui, grain, ui.clip_rect()));
             ScrollArea::vertical().show(ui, add);
         });
 }
 
 fn center(ctx: &Context, grain: egui::TextureId, add: impl FnOnce(&mut Ui)) {
     egui::CentralPanel::default()
-        .frame(Frame::new().fill(BG).inner_margin(egui::Margin::same(19)))
+        .frame(Frame::new().fill(BG).inner_margin(egui::Margin::same(20)))
         .show(ctx, |ui| {
-            ui.painter().add(theme::paper(ui, grain, ui.max_rect()));
+            ui.painter().add(theme::paper(ui, grain, ui.clip_rect()));
             add(ui);
         });
+}
+
+fn search_field(ui: &mut Ui, query: &mut String, placeholder: &str) -> egui::Response {
+    let width = (ui.available_width() - 160.0).clamp(85.0, 206.0);
+    let response = ui.add(
+        egui::TextEdit::singleline(query)
+            .hint_text(placeholder)
+            .desired_width(width)
+            .margin(egui::Margin {
+                left: 27,
+                right: 7,
+                top: 4,
+                bottom: 4,
+            }),
+    );
+    let center = egui::pos2(response.rect.left() + 12.0, response.rect.center().y - 1.0);
+    let stroke = egui::Stroke::new(1.5_f32, if response.has_focus() { RULE } else { MUTED });
+    ui.painter().circle_stroke(center, 4.4, stroke);
+    ui.painter().line_segment(
+        [center + egui::vec2(3.2, 3.2), center + egui::vec2(6.3, 6.3)],
+        stroke,
+    );
+    response
 }
 
 fn muted(ui: &mut Ui, text: impl Into<String>) {
@@ -459,7 +483,7 @@ fn muted(ui: &mut Ui, text: impl Into<String>) {
 fn caption(ui: &mut Ui, text: &str) {
     ui.label(
         RichText::new(text)
-            .font(theme::display_font(14.0))
+            .font(theme::display_font(16.0))
             .color(ACCENT),
     );
 }

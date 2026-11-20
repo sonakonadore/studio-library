@@ -297,35 +297,46 @@ impl Studio {
                                 self.samples.selected.remove(path);
                             }
                         }
-                        if ui
-                            .add(
-                                egui::Button::selectable(
-                                    focused,
-                                    RichText::new(name(path)).strong(),
-                                )
-                                .truncate(),
+                        let name_width = (ui.available_width() - 84.0).max(40.0);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(name_width, ui.spacing().interact_size.y),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                if ui
+                                    .add(
+                                        egui::Button::selectable(
+                                            focused,
+                                            RichText::new(name(path)).strong(),
+                                        )
+                                        .truncate(),
+                                    )
+                                    .on_hover_text(name(path))
+                                    .clicked()
+                                {
+                                    choose = Some((path.clone(), row.tags.join(", ")));
+                                }
+                            },
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                RichText::new(duration(row.analysis.seconds))
+                                    .small()
+                                    .color(MUTED),
                             )
-                            .clicked()
-                        {
-                            choose = Some((path.clone(), row.tags.join(", ")));
-                        }
+                            .on_hover_text("재생 길이");
+                        });
                     });
                     ui.horizontal(|ui| {
                         if self.samples.playing.as_ref() == Some(path) {
                             ui.label(RichText::new("재생 중").small().color(ACCENT));
                         }
-                        let text = format!(
-                            "{} · {}",
-                            row.analysis
-                                .seconds
-                                .map_or_else(|| "길이 미확인".into(), |s| format!("{s:.2}초")),
-                            row.tags
-                                .iter()
-                                .take(3)
-                                .map(String::as_str)
-                                .collect::<Vec<_>>()
-                                .join("  /  ")
-                        );
+                        let text = row
+                            .tags
+                            .iter()
+                            .take(3)
+                            .map(String::as_str)
+                            .collect::<Vec<_>>()
+                            .join("  /  ");
                         ui.add(
                             egui::Label::new(RichText::new(&text).small().color(MUTED)).truncate(),
                         )
@@ -381,9 +392,7 @@ impl Studio {
         };
         ui.heading(name(&row.source.path));
         path_label(ui, &row.source.path);
-        if let Some(seconds) = row.analysis.seconds {
-            muted(ui, format!("{seconds:.2}초"));
-        }
+        muted(ui, format!("재생 길이  {}", duration(row.analysis.seconds)));
         if let Some(error) = &row.analysis.error {
             ui.label(RichText::new("오디오 분석 실패").color(WARN))
                 .on_hover_text(error);
@@ -485,5 +494,13 @@ impl Studio {
             Ok(None) => {}
             Err(error) => self.error(error),
         }
+    }
+}
+
+fn duration(seconds: Option<f64>) -> String {
+    match seconds {
+        Some(seconds) if seconds < 1.0 => format!("{seconds:.3}초"),
+        Some(seconds) => format!("{seconds:.2}초"),
+        None => "길이 미확인".into(),
     }
 }

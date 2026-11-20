@@ -151,10 +151,10 @@ impl Store {
     ) -> Result<SampleScan> {
         ensure!(root.directory, "Splice 폴더를 선택하세요.");
         root.check(&root.path)?;
-        let previous: BTreeMap<PathBuf, Stamp> = self
+        let previous: BTreeMap<PathBuf, (Stamp, u32)> = self
             .samples(root)?
             .into_iter()
-            .map(|sample| (sample.source.path, sample.stamp))
+            .map(|sample| (sample.source.path, (sample.stamp, sample.analysis.revision)))
             .collect();
         let mut seen = BTreeSet::new();
         let mut changed = Vec::new();
@@ -197,7 +197,7 @@ impl Store {
                 }
             };
             seen.insert(source.path.clone());
-            if previous.get(&source.path) != Some(&stamp) {
+            if previous.get(&source.path) != Some(&(stamp, audio::ANALYSIS_REVISION)) {
                 let analysis = match audio::analyze(&source, cancel) {
                     Ok(analysis) => analysis,
                     Err(error) if error.is::<Cancelled>() => return Err(error),

@@ -1,8 +1,9 @@
 use eframe::egui::Context;
-use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink};
+use rodio::{OutputStream, OutputStreamBuilder, Sink};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
+use studio_library::audio::decode_preview;
 use studio_library::scope::Source;
 
 enum Command {
@@ -38,7 +39,7 @@ impl Player {
                     Ok(Command::Play(source, volume)) => {
                         drop(sink.take());
                         let result = (|| -> anyhow::Result<Sink> {
-                            let decoded = Decoder::try_from(source.open()?)?;
+                            let decoded = decode_preview(&source)?;
                             if stream.is_none() {
                                 let mut output = OutputStreamBuilder::open_default_stream()?;
                                 output.log_on_drop(false);

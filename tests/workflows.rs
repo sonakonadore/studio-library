@@ -330,3 +330,90 @@ fn incrementally_indexes_three_audio_formats_and_persists_tags() -> Result<()> {
     assert!(sample_plan(std::slice::from_ref(&row.source), destination, &stop).is_err());
     Ok(())
 }
+
+#[test]
+fn distinguishes_drum_types_and_requires_genre_evidence() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = Scope::select(temp.path())?;
+    let wave = pcm_wave();
+    let stop = AtomicBool::new(false);
+    for (path, instrument, genre) in [
+        ("No style/CM_Kick04.wav", "킥", "미분류"),
+        ("No style/CM_SNR_01.wav", "스네어", "미분류"),
+        ("No style/CM_CLAP_01.wav", "클랩", "미분류"),
+        ("No style/CM_snare_rimshot_pop.wav", "림샷", "미분류"),
+        ("Deep House/CM_CHH_01.wav", "클로즈드 햇", "하우스"),
+        ("Deep House/CM_Hat_Open.wav", "오픈 햇", "하우스"),
+        ("No style/Shakers/CM_random.wav", "셰이커", "미분류"),
+        ("Hip Hop Pack/CM_Shaker.wav", "셰이커", "힙합"),
+        ("No style/Mystery_hh.wav", "하이햇", "미분류"),
+        ("No style/CM_clap_snare.wav", "미분류", "미분류"),
+        ("Kicks/CM_Synth.wav", "신스", "미분류"),
+        ("House/CM_Kick.wav", "킥", "하우스"),
+    ] {
+        let file = fixture(&root.path, path, &wave)?;
+        let analysis = studio_library::audio::analyze(&root.source(file), &stop)?;
+        assert_eq!(analysis.tags[0], format!("악기 · {instrument}"), "{path}");
+        assert_eq!(analysis.tags[1], format!("장르 · {genre}"), "{path}");
+        assert_eq!(analysis.seconds, Some(0.5));
+    }
+    let info = b"LIST\x12\x00\x00\x00INFOIGNR\x06\x00\x00\x00House\x00";
+    let mut tagged_wave = wave.clone();
+    let riff_size = (tagged_wave.len() + info.len() - 8) as u32;
+    tagged_wave[4..8].copy_from_slice(&riff_size.to_le_bytes());
+    tagged_wave.splice(36..36, info.iter().copied());
+    let file = fixture(
+        &root.path,
+        "Genre in WAV metadata/CM_CLAP_02.wav",
+        &tagged_wave,
+    )?;
+    let analysis = studio_library::audio::analyze(&root.source(file), &stop)?;
+    assert_eq!(analysis.tags[0], "악기 · 클랩");
+    assert_eq!(analysis.tags[1], "장르 · 하우스");
+    Ok(())
+}
+
+#[test]
+fn refreshes_old_suggestions_and_keeps_user_tags() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path().join("splice");
+    fixture(&root, "Clap.wav", &pcm_wave())?;
+    let scope = Scope::select(&root)?;
+    let db = temp.path().join("cache.sqlite3");
+    let mut store = Store::open(&db)?;
+    let stop = AtomicBool::new(false);
+    let baseline = store.scan_samples(&scope, &[], &stop, |_, _| {})?;
+    store.tag_sample(&baseline.rows[0].source, &["내 드럼".into()])?;
+    let legacy = r#"{"seconds":0.5,"tags":["악기 · 스네어"],"error":null}"#;
+    rusqlite::Connection::open(&db)?.execute("UPDATE samples SET analysis = ?1", [legacy])?;
+    let updated = store.scan_samples(&scope, &[], &stop, |_, _| {})?;
+    assert_eq!(updated.decoded, 1);
+    assert_eq!(updated.rows[0].analysis.tags[0], "악기 · 클랩");
+    assert_eq!(updated.rows[0].tags, ["내 드럼"]);
+    assert_eq!(
+        store.scan_samples(&scope, &[], &stop, |_, _| {})?.decoded,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn decodes_wav_with_empty_metadata_list_without_rewriting_it() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let scope = Scope::select(temp.path())?;
+    let mut wave = pcm_wave();
+    let riff_size = (wave.len()) as u32;
+    wave[4..8].copy_from_slice(&riff_size.to_le_bytes());
+    wave.splice(36..36, b"LIST\0\0\0\0".iter().copied());
+    let file = fixture(&scope.path, "Rimshot.wav", &wave)?;
+    let source = scope.source(file.clone());
+    let analysis = studio_library::audio::analyze(&source, &AtomicBool::new(false))?;
+    assert_eq!(analysis.seconds, Some(0.5));
+    assert_eq!(analysis.tags[0], "악기 · 림샷");
+    assert_eq!(
+        studio_library::audio::decode_preview(&source)?.count(),
+        4000
+    );
+    assert_eq!(fs::read(file)?, wave);
+    Ok(())
+}

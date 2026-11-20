@@ -18,7 +18,7 @@ mod sample_tab;
 
 mod theme;
 
-use theme::{ACCENT, BG, GOLD, LINE, MUTED, RAISED, RULE, SURFACE, TEXT, WARN};
+use theme::{ACCENT, BG, BUTTON_ORANGE, GOLD, LINE, MUTED, RAISED, RULE, SURFACE, TEXT, WARN};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -75,7 +75,7 @@ pub struct Studio {
 impl Studio {
     pub fn new(ctx: &Context) -> Result<Self> {
         theme::style(ctx);
-        let paper_grain = theme::grain(ctx);
+        let paper_grain = theme::grain(ctx)?;
         let db = database_path()?;
         let store = Store::open(&db)?;
         let settings = store.settings()?;
@@ -245,9 +245,9 @@ impl Studio {
                             let selected = self.tab == tab;
                             let label = RichText::new(label)
                                 .font(theme::display_font(14.0))
-                                .color(if selected { RAISED } else { TEXT });
+                                .color(TEXT);
                             let button = egui::Button::new(label).fill(if selected {
-                                ACCENT
+                                BUTTON_ORANGE
                             } else {
                                 RAISED
                             });
@@ -489,8 +489,8 @@ fn caption(ui: &mut Ui, text: &str) {
 }
 
 fn action(ui: &mut Ui, enabled: bool, text: &str) -> bool {
-    let color = if enabled { RAISED } else { MUTED };
-    let fill = if enabled { ACCENT } else { SURFACE };
+    let color = if enabled { TEXT } else { MUTED };
+    let fill = if enabled { BUTTON_ORANGE } else { SURFACE };
     let button = egui::Button::new(
         RichText::new(text)
             .color(color)

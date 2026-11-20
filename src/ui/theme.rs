@@ -8,11 +8,12 @@ pub(super) const RULE: Color32 = Color32::from_rgb(175, 76, 30);
 pub(super) const TEXT: Color32 = Color32::from_rgb(45, 32, 20);
 pub(super) const MUTED: Color32 = Color32::from_rgb(78, 52, 29);
 pub(super) const ACCENT: Color32 = Color32::from_rgb(171, 60, 16);
+pub(super) const BUTTON_ORANGE: Color32 = Color32::from_rgb(238, 135, 72);
 pub(super) const WARN: Color32 = Color32::from_rgb(126, 39, 14);
 pub(super) const GOLD: Color32 = Color32::from_rgb(253, 190, 59);
 const HIGHLIGHT: Color32 = Color32::from_rgb(247, 214, 156);
 const INTERACTION: Color32 = Color32::from_rgb(240, 191, 117);
-const TILE: usize = 512;
+const PAPER_TILE_POINTS: f32 = 640.0;
 
 pub(super) fn display_font(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name("display".into()))
@@ -98,62 +99,24 @@ pub(super) fn style(ctx: &Context) {
     ctx.set_style(style);
 }
 
-pub(super) fn grain(ctx: &Context) -> egui::TextureHandle {
-    // Combine soft pulp variations with fine flecks, keeping grain out of the text itself.
-    let mut seed = 0x7639_912b_u32;
-    let mut noise = || {
-        seed ^= seed << 13;
-        seed ^= seed >> 17;
-        seed ^= seed << 5;
-        (seed & 0xff) as f32 / 127.5 - 1.0
-    };
-    let coarse: Vec<_> = (0..8 * 8).map(|_| noise()).collect();
-    let fine: Vec<_> = (0..64 * 64).map(|_| noise()).collect();
-    let pixels = (0..TILE * TILE)
-        .map(|index| {
-            let x = index % TILE;
-            let y = index / TILE;
-            let tone = 13.0 * paper_noise(&coarse, 8, x, y)
-                + 18.0 * paper_noise(&fine, 64, x, y)
-                + 20.0 * noise();
-            if tone < 0.0 {
-                Color32::from_rgba_unmultiplied(97, 48, 13, (tone.abs() * 0.75) as u8)
-            } else {
-                Color32::from_rgba_unmultiplied(255, 249, 227, tone as u8)
-            }
-        })
-        .collect();
-    ctx.load_texture(
+pub(super) fn grain(ctx: &Context) -> anyhow::Result<egui::TextureHandle> {
+    let grain = image::load_from_memory_with_format(
+        include_bytes!("../../assets/paper-grain.png"),
+        image::ImageFormat::Png,
+    )?
+    .into_rgba8();
+    let size = [grain.width() as usize, grain.height() as usize];
+    Ok(ctx.load_texture(
         "paper-grain",
-        egui::ColorImage::new([TILE, TILE], pixels),
-        egui::TextureOptions::LINEAR_REPEAT,
-    )
-}
-
-fn paper_noise(grid: &[f32], width: usize, x: usize, y: usize) -> f32 {
-    let pitch = TILE / width;
-    let row = y / pitch;
-    let col = x / pitch;
-    let next_row = (row + 1) % width;
-    let next_col = (col + 1) % width;
-    let x_weight = (x % pitch) as f32 / pitch as f32;
-    let y_weight = (y % pitch) as f32 / pitch as f32;
-    let top = egui::lerp(
-        grid[row * width + col]..=grid[row * width + next_col],
-        x_weight,
-    );
-    let bottom = egui::lerp(
-        grid[next_row * width + col]..=grid[next_row * width + next_col],
-        x_weight,
-    );
-    egui::lerp(top..=bottom, y_weight)
+        egui::ColorImage::from_rgba_unmultiplied(size, grain.as_raw()),
+        egui::TextureOptions::LINEAR_MIRRORED_REPEAT,
+    ))
 }
 
 pub(super) fn paper(ui: &Ui, texture: egui::TextureId, rect: Rect) -> Shape {
     let rect = rect.intersect(ui.clip_rect());
     let mut mesh = egui::Mesh::with_texture(texture);
-    let step = TILE as f32 / 1.75;
-    let uv = Rect::from_min_max(rect.min / step, rect.max / step);
+    let uv = Rect::from_min_max(rect.min / PAPER_TILE_POINTS, rect.max / PAPER_TILE_POINTS);
     mesh.add_rect_with_uv(rect, uv, Color32::WHITE);
     Shape::mesh(mesh)
 }

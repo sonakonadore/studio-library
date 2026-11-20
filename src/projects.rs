@@ -10,9 +10,9 @@ use walkdir::WalkDir;
 pub const FORMATS: &[(&str, &str)] = &[
     ("Ableton Live", "als"),
     ("Logic Pro", "logicx"),
+    ("Cubase", "cpr"),
     ("GarageBand", "band"),
     ("Fender Studio Pro", "song"),
-    ("Cubase", "cpr"),
     ("FL Studio", "flp"),
     ("REAPER", "rpp"),
     ("Pro Tools", "ptx"),

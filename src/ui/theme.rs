@@ -14,6 +14,7 @@ pub(super) const GOLD: Color32 = Color32::from_rgb(253, 190, 59);
 const HIGHLIGHT: Color32 = Color32::from_rgb(247, 214, 156);
 const INTERACTION: Color32 = Color32::from_rgb(240, 191, 117);
 const PAPER_TILE_POINTS: f32 = 640.0;
+const PAPER_GRAIN_OPACITY: u8 = 192;
 
 pub(super) fn display_font(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name("display".into()))
@@ -117,7 +118,7 @@ pub(super) fn paper(ui: &Ui, texture: egui::TextureId, rect: Rect) -> Shape {
     let rect = rect.intersect(ui.clip_rect());
     let mut mesh = egui::Mesh::with_texture(texture);
     let uv = Rect::from_min_max(rect.min / PAPER_TILE_POINTS, rect.max / PAPER_TILE_POINTS);
-    mesh.add_rect_with_uv(rect, uv, Color32::WHITE);
+    mesh.add_rect_with_uv(rect, uv, Color32::from_white_alpha(PAPER_GRAIN_OPACITY));
     Shape::mesh(mesh)
 }
 

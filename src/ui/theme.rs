@@ -13,7 +13,7 @@ pub(super) const WARN: Color32 = Color32::from_rgb(126, 39, 14);
 pub(super) const GOLD: Color32 = Color32::from_rgb(253, 190, 59);
 const HIGHLIGHT: Color32 = Color32::from_rgb(247, 214, 156);
 const INTERACTION: Color32 = Color32::from_rgb(240, 191, 117);
-const PAPER_TILE_POINTS: f32 = 640.0;
+const PAPER_SHEET_POINTS: egui::Vec2 = egui::vec2(1536.0, 1024.0);
 const PAPER_GRAIN_OPACITY: u8 = 192;
 
 pub(super) fn display_font(size: f32) -> FontId {
@@ -102,7 +102,7 @@ pub(super) fn style(ctx: &Context) {
 
 pub(super) fn grain(ctx: &Context) -> anyhow::Result<egui::TextureHandle> {
     let grain = image::load_from_memory_with_format(
-        include_bytes!("../../assets/paper-grain.png"),
+        include_bytes!("../../assets/paper-sheet.png"),
         image::ImageFormat::Png,
     )?
     .into_rgba8();
@@ -110,14 +110,21 @@ pub(super) fn grain(ctx: &Context) -> anyhow::Result<egui::TextureHandle> {
     Ok(ctx.load_texture(
         "paper-grain",
         egui::ColorImage::from_rgba_unmultiplied(size, grain.as_raw()),
-        egui::TextureOptions::LINEAR_MIRRORED_REPEAT,
+        egui::TextureOptions::LINEAR,
     ))
 }
 
 pub(super) fn paper(ui: &Ui, texture: egui::TextureId, rect: Rect) -> Shape {
     let rect = rect.intersect(ui.clip_rect());
+    let window = ui.ctx().content_rect();
+    // Share one sheet across all panels, enlarging it only when the window outgrows it.
+    let scale = (window.width() / PAPER_SHEET_POINTS.x)
+        .max(window.height() / PAPER_SHEET_POINTS.y)
+        .max(1.0);
+    let sheet = Rect::from_min_size(window.min, PAPER_SHEET_POINTS * scale);
+    let texture_bounds = Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(1.0));
+    let uv = egui::emath::RectTransform::from_to(sheet, texture_bounds).transform_rect(rect);
     let mut mesh = egui::Mesh::with_texture(texture);
-    let uv = Rect::from_min_max(rect.min / PAPER_TILE_POINTS, rect.max / PAPER_TILE_POINTS);
     mesh.add_rect_with_uv(rect, uv, Color32::from_white_alpha(PAPER_GRAIN_OPACITY));
     Shape::mesh(mesh)
 }

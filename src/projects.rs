@@ -24,15 +24,15 @@ pub fn media_help(ext: &str) -> &'static str {
         "als" => "Ableton Live · File → Collect All and Save",
         "logicx" => "Logic Pro · File → Project Management → Consolidate",
         "song" => {
-            "Fender Studio Pro · File → Save to New Folder. Keep Media and History alongside the .song file."
+            "Fender Studio Pro · File → Save to New Folder · .song 옆의 Media·History 폴더 보존"
         }
         "cpr" => "Cubase · File → Back up Project",
-        "rpp" => "REAPER · Save Project As, then enable the project folder and media copy options.",
+        "rpp" => "REAPER · Save Project As에서 프로젝트 폴더와 미디어 복사 옵션 사용",
         "flp" => "FL Studio · File → Export → Zipped loop package",
-        "ptx" => "Pro Tools · File → Save Copy In, then include audio files.",
-        "band" => "GarageBand · Save and locate the complete .band package in Finder.",
+        "ptx" => "Pro Tools · File → Save Copy In에서 오디오 파일 포함",
+        "band" => "GarageBand · 프로젝트를 저장하고 Finder에서 .band 패키지 전체 확인",
         "bwproject" => "Bitwig Studio · File → Collect and Save",
-        _ => "Collect external media into the project folder in your DAW before copying.",
+        _ => "사용 중인 DAW에서 외부 미디어를 프로젝트 폴더에 수집한 후 복사하세요.",
     }
 }
 
@@ -62,17 +62,17 @@ impl Rule {
             RuleKind::Extension => pattern.trim().trim_start_matches('.'),
             RuleKind::FolderName => pattern.trim(),
         };
-        ensure!(!daw.trim().is_empty(), "Enter the DAW name.");
+        ensure!(!daw.trim().is_empty(), "DAW 이름을 입력하세요.");
         ensure!(
             !pattern.is_empty()
                 && !pattern.contains(['/', '\\', ':'])
                 && !pattern.chars().any(char::is_control),
-            "Enter a valid rule."
+            "유효한 규칙을 입력하세요."
         );
         if kind == RuleKind::Extension {
             ensure!(
                 !pattern.contains(['.', '*', '?']) && !pattern.chars().any(char::is_whitespace),
-                "Enter one extension, such as als."
+                "확장자 하나를 입력하세요. 예: als"
             );
         }
         Ok(Self {
@@ -192,7 +192,7 @@ pub fn scan(
         check_cancel(cancel)?;
         if in_history(&scope.path) {
             scan.warnings
-                .push(format!("Skipped History item · {}", scope.path.display()));
+                .push(format!("History 항목 건너뜀 · {}", scope.path.display()));
             continue;
         }
         let owner = roots
@@ -356,10 +356,8 @@ fn project(
                 Ok(entry) if entry.file_type().is_file() && is_audio(entry.path()) => {
                     nearby.push(source.scope.source(entry.into_path()));
                     if nearby.len() >= 200 {
-                        scan.warnings.push(format!(
-                            "Showing up to 200 audio candidates · {}",
-                            path.display()
-                        ));
+                        scan.warnings
+                            .push(format!("오디오 후보 200개까지 표시 · {}", path.display()));
                         break;
                     }
                 }

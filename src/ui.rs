@@ -98,7 +98,7 @@ impl Studio {
             },
             job: None,
             plan: None,
-            status: "Ready".into(),
+            status: "준비 완료".into(),
             warnings: Vec::new(),
             show_warnings: false,
             player: Player::new(ctx.clone()),
@@ -132,9 +132,9 @@ impl Studio {
 
     fn error(&mut self, error: anyhow::Error) {
         self.status = if error.is::<Cancelled>() {
-            "Canceled".into()
+            "작업을 취소했어요.".into()
         } else {
-            format!("Failed · {error:#}")
+            format!("실패 · {error:#}")
         };
     }
 
@@ -162,7 +162,7 @@ impl Studio {
                 Ok(Event::Done(outcome)) => break outcome,
                 Err(std::sync::mpsc::TryRecvError::Empty) => return,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    break Err(anyhow::anyhow!("The background task stopped unexpectedly."));
+                    break Err(anyhow::anyhow!("작업이 중단됐어요. 다시 시도해 주세요."));
                 }
             }
         };
@@ -171,7 +171,7 @@ impl Studio {
         match result {
             Ok(Outcome::Projects(scan)) => {
                 self.status = format!(
-                    "Scan complete · {} projects · {} links skipped",
+                    "탐색 완료 · 프로젝트 {}개 · 건너뛴 링크 {}개",
                     scan.projects.len(),
                     scan.skipped
                 );
@@ -189,7 +189,7 @@ impl Studio {
             }
             Ok(Outcome::Samples(scan)) => {
                 self.status = format!(
-                    "Scan complete · {} samples · {} analyzed · {} items skipped",
+                    "탐색 완료 · 샘플 {}개 · 새로 분석 {}개 · 건너뛴 항목 {}개",
                     scan.rows.len(),
                     scan.decoded,
                     scan.skipped
@@ -198,7 +198,7 @@ impl Studio {
                 self.replace_samples(scan.rows);
             }
             Ok(Outcome::Plan(plan)) => {
-                self.status = "Review the source and destination.".into();
+                self.status = "복사할 원본과 보관 위치를 확인해 주세요.".into();
                 self.plan = Some(plan);
             }
             Ok(Outcome::Copy(report)) => {
@@ -213,7 +213,7 @@ impl Studio {
                     self.status = message;
                 } else {
                     self.status = format!(
-                        "{message} · Could not record the copy destination · {}",
+                        "{message} · 복사 위치를 저장하지 못했어요. · {}",
                         self.status
                     );
                 }
@@ -274,7 +274,11 @@ impl Studio {
                     if let Some(job) = &self.job {
                         ui.spinner();
                         let cancelled = job.cancel.load(Ordering::Relaxed);
-                        let label = if cancelled { "Canceling…" } else { job.label };
+                        let label = if cancelled {
+                            "취소 중…"
+                        } else {
+                            job.label
+                        };
                         ui.label(RichText::new(format!("{label} {}", job.progress)).color(ACCENT));
                         if ui
                             .add_enabled(!cancelled, egui::Button::new("Cancel"))
@@ -283,8 +287,8 @@ impl Studio {
                             job.cancel.store(true, Ordering::Relaxed);
                         }
                     } else {
-                        let status = self.status.to_ascii_lowercase();
-                        let color = if status.contains("failed") || status.contains("canceled") {
+                        let color = if self.status.contains("실패") || self.status.contains("취소")
+                        {
                             WARN
                         } else {
                             MUTED
@@ -324,6 +328,7 @@ impl Studio {
             egui::Modal::new(egui::Id::new("approved_copy")).show(ctx, |ui| {
                 ui.set_width(650.0);
                 ui.heading("Review copy plan");
+                muted(ui, "원본을 그대로 두고 아래 위치에 복사합니다.");
                 ui.label(format!("Destination  {}", plan.target().display()));
                 ui.label(
                     RichText::new(format!("Estimated size  {}", byte_count(plan.bytes())))
@@ -331,8 +336,11 @@ impl Studio {
                 );
                 if plan.skipped > 0 {
                     ui.label(
-                        RichText::new(format!("{} links or special files skipped", plan.skipped))
-                            .color(WARN),
+                        RichText::new(format!(
+                            "링크 또는 특수 파일 {}개는 건너뜁니다.",
+                            plan.skipped
+                        ))
+                        .color(WARN),
                     );
                 }
                 ui.separator();
@@ -369,14 +377,14 @@ impl Studio {
                 });
             });
             if approve {
-                self.job = Some(Job::start(ctx, "Copying", move |cancel, update| {
+                self.job = Some(Job::start(ctx, "복사 중", move |cancel, update| {
                     let report = plan.execute(cancel, |done, total| {
                         update(format!("{} / {}", byte_count(done), byte_count(total)));
                     });
                     Ok(Outcome::Copy(report))
                 }));
             } else if decline {
-                self.status = "Copy canceled".into();
+                self.status = "복사를 취소했어요.".into();
             } else {
                 self.plan = Some(plan);
             }

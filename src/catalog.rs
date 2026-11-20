@@ -52,7 +52,7 @@ pub struct Store {
 pub fn database_path() -> Result<PathBuf> {
     let folder = match std::env::var_os("STUDIO_LIBRARY_DATA_DIR") {
         Some(folder) => PathBuf::from(folder),
-        None => PathBuf::from(std::env::var_os("HOME").context("Home folder is unavailable")?)
+        None => PathBuf::from(std::env::var_os("HOME").context("홈 폴더 없음")?)
             .join("Library/Application Support/Studio Library"),
     };
     std::fs::create_dir_all(&folder)?;
@@ -149,7 +149,7 @@ impl Store {
         cancel: &AtomicBool,
         mut progress: impl FnMut(usize, usize),
     ) -> Result<SampleScan> {
-        ensure!(root.directory, "Choose a Splice folder.");
+        ensure!(root.directory, "Splice 폴더를 선택하세요.");
         root.check(&root.path)?;
         let previous: BTreeMap<PathBuf, (Stamp, u32)> = self
             .samples(root)?
@@ -209,7 +209,7 @@ impl Store {
                         changed.push((source.path, stamp, analysis))
                     }
                     _ => warnings.push(format!(
-                        "File changed during the scan · {}",
+                        "스캔 중 파일이 바뀌었습니다. · {}",
                         source.path.display()
                     )),
                 }
@@ -266,6 +266,5 @@ pub fn matches_tags(tags: &[String], filters: &[String]) -> bool {
 }
 
 fn path_text(path: &Path) -> Result<&str> {
-    path.to_str()
-        .context("Choose a path with a valid UTF-8 name.")
+    path.to_str().context("UTF-8 경로를 선택하세요.")
 }

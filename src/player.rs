@@ -55,9 +55,7 @@ impl Player {
                                 sink = Some(output);
                                 notify(Playback::Playing(source.path));
                             }
-                            Err(error) => {
-                                notify(Playback::Error(format!("Playback failed · {error:#}")))
-                            }
+                            Err(error) => notify(Playback::Error(format!("재생 실패 · {error:#}"))),
                         }
                     }
                     Ok(Command::Stop) => {

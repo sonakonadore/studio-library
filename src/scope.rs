@@ -45,13 +45,10 @@ impl Scope {
         let selected = fs::symlink_metadata(path).with_context(|| path.display().to_string())?;
         ensure!(
             selected.is_file() || selected.is_dir(),
-            "Choose a regular file or folder."
+            "일반 파일 또는 폴더를 선택하세요."
         );
         let path = path.canonicalize()?;
-        ensure!(
-            path.to_str().is_some(),
-            "Choose a path with a valid UTF-8 name."
-        );
+        ensure!(path.to_str().is_some(), "UTF-8 경로를 선택하세요.");
         Ok(Self {
             path,
             device: selected.dev(),
@@ -63,34 +60,33 @@ impl Scope {
     pub fn check(&self, path: &Path) -> Result<Metadata> {
         let relative = path
             .strip_prefix(&self.path)
-            .context("Path outside the selected location")?;
+            .context("선택 범위 밖의 경로")?;
         ensure!(
             self.directory || relative.as_os_str().is_empty(),
-            "Path outside the selected location"
+            "선택 범위 밖의 경로"
         );
         let mut current = self.path.clone();
-        let mut meta = fs::symlink_metadata(&current).with_context(|| {
-            format!("Could not access selected location · {}", current.display())
-        })?;
+        let mut meta = fs::symlink_metadata(&current)
+            .with_context(|| format!("선택 경로에 접근할 수 없음 · {}", current.display()))?;
         ensure!(
             meta.dev() == self.device && meta.ino() == self.inode && !meta.is_symlink(),
-            "The selected location changed. Select it again. · {}",
+            "선택 경로가 바뀌었습니다. 다시 선택하세요. · {}",
             current.display()
         );
         ensure!(
             current.canonicalize()? == self.path,
-            "The parent folder changed. · {}",
+            "선택 경로의 상위 폴더가 바뀌었습니다. · {}",
             current.display()
         );
         for part in relative.components() {
             let Component::Normal(part) = part else {
-                anyhow::bail!("Path outside the selected location");
+                anyhow::bail!("선택 범위 밖의 경로");
             };
             current.push(part);
             meta = fs::symlink_metadata(&current).with_context(|| current.display().to_string())?;
             ensure!(
                 !meta.is_symlink() && meta.dev() == self.device,
-                "Skipped a link or another volume · {}",
+                "링크 또는 다른 볼륨 건너뜀 · {}",
                 current.display()
             );
         }
@@ -120,7 +116,7 @@ impl Source {
 
     pub fn open(&self) -> Result<File> {
         let before = self.metadata()?;
-        ensure!(before.is_file(), "Choose a regular file.");
+        ensure!(before.is_file(), "일반 파일을 선택하세요.");
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
@@ -130,7 +126,7 @@ impl Source {
             after.is_file()
                 && Stamp::from(&before) == Stamp::from(&after)
                 && Stamp::from(&self.metadata()?) == Stamp::from(&after),
-            "File changed. · {}",
+            "파일이 바뀌었습니다. · {}",
             self.path.display()
         );
         Ok(file)
@@ -142,7 +138,7 @@ pub struct Cancelled;
 
 impl std::fmt::Display for Cancelled {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Canceled")
+        f.write_str("취소됨")
     }
 }
 
@@ -182,7 +178,7 @@ pub fn safe_component(value: &str) -> Result<&str> {
             && value.len() <= 240
             && !value.contains(['/', '\\', ':'])
             && !value.chars().any(char::is_control),
-        "Invalid folder name · {value}"
+        "폴더 이름에 사용할 수 없습니다. · {value}"
     );
     Ok(value)
 }

@@ -12,7 +12,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "스튜디오 라이브러리",
+        "Studio Library",
         options,
         Box::new(|cc| Ok(Box::new(ui::Studio::new(&cc.egui_ctx)?))),
     )

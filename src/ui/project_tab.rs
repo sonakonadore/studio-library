@@ -6,7 +6,7 @@ impl Studio {
         let settings = self.settings.clone();
         self.job = Some(Job::start(
             ctx,
-            "프로젝트 탐색 중",
+            "Scanning projects",
             move |cancel, update| {
                 let scan = projects::scan(
                     &settings.roots,
@@ -14,7 +14,7 @@ impl Studio {
                     &settings.rules,
                     &settings.outputs,
                     cancel,
-                    |count| update(format!("· 후보 {count}개")),
+                    |count| update(format!("· {count} projects found")),
                 )?;
                 Ok(Outcome::Projects(scan))
             },
@@ -22,17 +22,22 @@ impl Studio {
     }
 
     pub(super) fn project_tab(&mut self, ctx: &Context) {
-        left_panel("project_sources", ctx, |ui| self.project_sources(ctx, ui));
-        right_panel("project_detail", ctx, |ui| self.project_detail(ctx, ui));
-        center(ctx, |ui| self.project_list(ui));
+        let grain = self.paper_grain.id();
+        left_panel("project_sources", ctx, grain, |ui| {
+            self.project_sources(ctx, ui)
+        });
+        right_panel("project_detail", ctx, grain, |ui| {
+            self.project_detail(ctx, ui)
+        });
+        center(ctx, grain, |ui| self.project_list(ui));
         self.rule_dialog(ctx);
     }
 
     fn project_sources(&mut self, ctx: &Context, ui: &mut Ui) {
-        caption(ui, "탐색 위치");
-        muted(ui, "프로젝트 폴더나 외장 드라이브를 선택하세요.");
-        if action(ui, self.ready(), "폴더 선택") {
-            match folder("프로젝트 탐색 폴더 선택") {
+        caption(ui, "Project folders");
+        muted(ui, "Choose a project folder or external drive.");
+        if action(ui, self.ready(), "Choose folder") {
+            match folder("Choose a folder to scan") {
                 Ok(Some(root)) => {
                     if self.save_settings(|settings| replace_scope(&mut settings.roots, root)) {
                         self.scan_projects(ctx);
@@ -46,7 +51,7 @@ impl Studio {
             ui.horizontal(|ui| {
                 if ui
                     .add_enabled(self.ready(), egui::Button::new("×").small())
-                    .on_hover_text("탐색 위치 제외")
+                    .on_hover_text("Remove scan folder")
                     .clicked()
                     && self.save_settings(|settings| {
                         settings.roots.retain(|item| item.path != root.path)
@@ -61,24 +66,24 @@ impl Studio {
             .add_enabled(
                 self.ready()
                     && (!self.settings.roots.is_empty() || !self.settings.manual.is_empty()),
-                egui::Button::new("다시 탐색"),
+                egui::Button::new("Rescan"),
             )
             .clicked()
         {
             self.scan_projects(ctx);
         }
         ui.separator();
-        caption(ui, "직접 등록");
+        caption(ui, "Add manually");
         ui.horizontal_wrapped(|ui| {
-            for (is_folder, label) in [(false, "파일 등록"), (true, "폴더 등록")] {
+            for (is_folder, label) in [(false, "Add file"), (true, "Add folder")] {
                 if ui
                     .add_enabled(self.ready(), egui::Button::new(label))
                     .clicked()
                 {
                     let pick = if is_folder {
-                        folder("프로젝트 폴더를 직접 등록")
+                        folder("Choose a project folder")
                     } else {
-                        file("프로젝트 파일 또는 패키지를 직접 등록")
+                        file("Choose a project file or package")
                     };
                     match pick {
                         Ok(Some(scope)) => {
@@ -101,7 +106,7 @@ impl Studio {
             ui.horizontal(|ui| {
                 if ui
                     .add_enabled(self.ready(), egui::Button::new("×").small())
-                    .on_hover_text("직접 등록 해제")
+                    .on_hover_text("Remove manual entry")
                     .clicked()
                     && self.save_settings(|settings| {
                         settings.manual.retain(|item| item.path != entry.path)
@@ -113,21 +118,21 @@ impl Studio {
             });
         }
         ui.separator();
-        caption(ui, "DAW 설정");
+        caption(ui, "DAW settings");
         if let Some(daw) = &self.settings.primary {
-            muted(ui, format!("주력 DAW · {daw}"));
+            muted(ui, format!("Primary DAW · {daw}"));
         } else {
-            muted(ui, "주력 DAW와 프로젝트 확장자를 설정할 수 있습니다.");
+            muted(ui, "Choose your main DAW and set detection rules.");
         }
         if ui
-            .add_enabled(self.ready(), egui::Button::new("주력 DAW 및 탐색 규칙"))
+            .add_enabled(self.ready(), egui::Button::new("DAW and detection rules"))
             .clicked()
         {
             self.projects.primary_draft = self.settings.primary.clone().unwrap_or_default();
             self.projects.show_rules = true;
         }
         ui.add_space(6.0);
-        egui::CollapsingHeader::new("자동 탐지 형식").show(ui, |ui| {
+        egui::CollapsingHeader::new("Supported formats").show(ui, |ui| {
             for (daw, ext) in FORMATS {
                 muted(ui, format!("{daw}  .{ext}"));
             }
@@ -139,14 +144,14 @@ impl Studio {
         if !open {
             return;
         }
-        egui::Window::new("주력 DAW 및 탐색 규칙")
+        egui::Window::new("DAW and detection rules")
             .open(&mut open)
             .default_width(470.0)
             .show(ctx, |ui| {
-                caption(ui, "주력 DAW");
+                caption(ui, "Primary DAW");
                 ui.horizontal_wrapped(|ui| {
                     egui::ComboBox::from_id_salt("daw_preset")
-                        .selected_text("기본 형식 선택")
+                        .selected_text("Choose a format")
                         .show_ui(ui, |ui| {
                             for (daw, ext) in FORMATS {
                                 if ui.button(format!("{daw}  .{ext}")).clicked() {
@@ -159,24 +164,24 @@ impl Studio {
                         });
                     ui.add(
                         egui::TextEdit::singleline(&mut self.projects.primary_draft)
-                            .hint_text("DAW 이름")
+                            .hint_text("DAW name")
                             .desired_width(180.0),
                     );
                 });
                 ui.add_space(5.0);
-                caption(ui, "탐색 규칙 추가");
+                caption(ui, "Add a detection rule");
                 ui.horizontal_wrapped(|ui| {
                     ui.add(
                         egui::TextEdit::singleline(&mut self.projects.rule_name)
-                            .hint_text("DAW 이름")
+                            .hint_text("DAW name")
                             .desired_width(140.0),
                     );
-                    ui.selectable_value(&mut self.projects.rule_folder, false, "확장자");
-                    ui.selectable_value(&mut self.projects.rule_folder, true, "폴더 이름");
+                    ui.selectable_value(&mut self.projects.rule_folder, false, "Extension");
+                    ui.selectable_value(&mut self.projects.rule_folder, true, "Folder name");
                     let hint = if self.projects.rule_folder {
-                        "일치할 폴더 이름"
+                        "Exact folder name"
                     } else {
-                        ".als 또는 사용자 확장자"
+                        "e.g. .als"
                     };
                     ui.add(
                         egui::TextEdit::singleline(&mut self.projects.rule_pattern)
@@ -184,7 +189,7 @@ impl Studio {
                             .desired_width(155.0),
                     );
                 });
-                if action(ui, self.ready(), "설정 저장") {
+                if action(ui, self.ready(), "Save settings") {
                     let primary = self.projects.primary_draft.trim().to_owned();
                     let kind = if self.projects.rule_folder {
                         RuleKind::FolderName
@@ -215,7 +220,7 @@ impl Studio {
                             }) {
                                 self.projects.rule_pattern.clear();
                                 self.projects.rule_name.clear();
-                                self.status = "DAW 설정 저장 완료".into();
+                                self.status = "DAW settings saved".into();
                                 if !self.settings.roots.is_empty()
                                     || !self.settings.manual.is_empty()
                                 {
@@ -227,20 +232,20 @@ impl Studio {
                     }
                 }
                 ui.separator();
-                caption(ui, "저장된 추가 규칙");
+                caption(ui, "Custom rules");
                 if self.settings.rules.is_empty() {
-                    muted(ui, "추가 규칙 없음");
+                    muted(ui, "No custom rules");
                 }
                 for (index, rule) in self.settings.rules.clone().into_iter().enumerate() {
                     ui.horizontal(|ui| {
                         let pattern = if rule.kind == RuleKind::Extension {
                             format!(".{}", rule.pattern)
                         } else {
-                            format!("폴더 {}", rule.pattern)
+                            format!("Folder {}", rule.pattern)
                         };
                         ui.label(format!("{}  ·  {pattern}", rule.daw));
                         if ui
-                            .add_enabled(self.ready(), egui::Button::new("삭제").small())
+                            .add_enabled(self.ready(), egui::Button::new("Remove").small())
                             .clicked()
                             && self.save_settings(|settings| {
                                 settings.rules.remove(index);
@@ -255,15 +260,15 @@ impl Studio {
     }
 
     fn project_list(&mut self, ui: &mut Ui) {
-        ui.heading("프로젝트 후보");
-        muted(ui, "곡 묶음, 버전, 원본 위치를 확인하세요.");
+        ui.heading("Discovered projects");
+        muted(ui, "Review song groups, versions and original locations.");
         ui.horizontal_wrapped(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.projects.query)
-                    .hint_text("곡·프로젝트 검색")
+                    .hint_text("Search projects")
                     .desired_width(210.0),
             );
-            ui.checkbox(&mut self.projects.review_only, "확인 목록");
+            ui.checkbox(&mut self.projects.review_only, "Needs review");
         });
         ui.separator();
         let query = key(self.projects.query.trim());
@@ -297,7 +302,7 @@ impl Studio {
             .count();
         muted(
             ui,
-            format!("{}개 표시 · 확인 필요 {total_review}개", rows.len()),
+            format!("{} shown · {total_review} to review", rows.len()),
         );
         if rows.is_empty() {
             ui.add_space(24.0);
@@ -305,9 +310,9 @@ impl Studio {
                 && self.settings.roots.is_empty()
                 && self.settings.manual.is_empty()
             {
-                ui.label("‘폴더 선택’으로 프로젝트 후보를 찾아보세요.");
+                ui.label("Choose a folder to find projects.");
             } else {
-                muted(ui, "표시할 프로젝트가 없습니다.");
+                muted(ui, "No matching projects.");
             }
         }
         let mut select = None;
@@ -316,10 +321,11 @@ impl Studio {
             .show_rows(ui, 54.0, rows.len(), |ui, visible| {
                 for (row, edit, review) in &rows[visible] {
                     let selected = self.projects.selected.as_ref() == Some(&row.source.path);
+                    let version = labels::version(&edit.version);
                     let text = if edit.group == edit.title {
-                        format!("{}   /   {}", edit.group, edit.version)
+                        format!("{}   /   {version}", edit.group)
                     } else {
-                        format!("{}   /   {}   /   {}", edit.group, edit.title, edit.version)
+                        format!("{}   /   {}   /   {version}", edit.group, edit.title)
                     };
                     let button =
                         egui::Button::selectable(selected, RichText::new(text).strong()).truncate();
@@ -328,10 +334,10 @@ impl Studio {
                     }
                     ui.horizontal(|ui| {
                         if *review {
-                            ui.label(RichText::new("확인 필요").small().color(WARN));
+                            ui.label(RichText::new("Review").small().color(WARN));
                         }
                         if row.manual {
-                            ui.label(RichText::new("직접 등록").small().color(ACCENT));
+                            ui.label(RichText::new("Manual").small().color(ACCENT));
                         }
                         path_label(ui, &row.source.path);
                     });
@@ -351,11 +357,8 @@ impl Studio {
             .find(|row| Some(&row.source.path) == self.projects.selected.as_ref())
             .cloned()
         else {
-            caption(ui, "프로젝트 상세");
-            muted(
-                ui,
-                "후보를 선택하면 곡 묶음과 복사 대상을 확인할 수 있습니다.",
-            );
+            caption(ui, "Project details");
+            muted(ui, "Select a project to review its group and copy options.");
             return;
         };
         let path = row.source.path.clone();
@@ -371,7 +374,7 @@ impl Studio {
         caption(ui, &row.daw);
         ui.heading(&saved.title);
         path_label(ui, &path);
-        if ui.button("Finder에서 보기").clicked()
+        if ui.button("Show in Finder").clicked()
             && let Err(error) = reveal(&row.source)
         {
             self.error(error);
@@ -379,27 +382,44 @@ impl Studio {
         let review = row.review && !self.settings.edits.contains_key(&path);
         if review {
             ui.label(
-                RichText::new("같은 제목의 후보가 있습니다. 묶음과 버전을 확인해 주세요.")
+                RichText::new("Several projects share this title. Review the group and version.")
                     .color(WARN),
             );
         }
         ui.separator();
         for (label, value) in [
-            ("곡 이름", &mut self.projects.draft.title),
-            ("버전", &mut self.projects.draft.version),
-            ("곡 묶음", &mut self.projects.draft.group),
+            ("Song title", &mut self.projects.draft.title),
+            ("Version", &mut self.projects.draft.version),
+            ("Song group", &mut self.projects.draft.group),
         ] {
             ui.label(label);
-            ui.add(egui::TextEdit::singleline(value).desired_width(f32::INFINITY));
+            if label == "Version"
+                && labels::version(value) == "Unversioned"
+                && value != "Unversioned"
+            {
+                let mut edit = String::new();
+                if ui
+                    .add(
+                        egui::TextEdit::singleline(&mut edit)
+                            .hint_text("Unversioned")
+                            .desired_width(f32::INFINITY),
+                    )
+                    .changed()
+                {
+                    *value = edit;
+                }
+            } else {
+                ui.add(egui::TextEdit::singleline(value).desired_width(f32::INFINITY));
+            }
         }
         let editing = self.projects.draft != saved;
         if ui
             .add_enabled(
                 self.ready() && (editing || review),
                 egui::Button::new(if review {
-                    "묶음 확인 및 저장"
+                    "Confirm and save"
                 } else {
-                    "곡 정보 저장"
+                    "Save project details"
                 }),
             )
             .clicked()
@@ -418,23 +438,23 @@ impl Studio {
                     if self.save_settings(|settings| {
                         settings.edits.insert(path.clone(), edit);
                     }) {
-                        self.status = "곡 정보 저장 완료".into();
+                        self.status = "Project details saved".into();
                     }
                 }
                 Err(error) => self.error(error),
             }
         }
         ui.separator();
-        caption(ui, "프로젝트 복사");
+        caption(ui, "Copy project");
         muted(ui, projects::media_help(&extension(&path)));
         if row.directory {
-            muted(ui, "프로젝트 폴더 내부 구조를 보존합니다.");
+            muted(ui, "The copy keeps the internal folder structure.");
         }
         if !row.companions.is_empty() {
             muted(
                 ui,
                 format!(
-                    "함께 복사 · {}",
+                    "Included · {}",
                     row.companions
                         .iter()
                         .map(|entry| name(&entry.path))
@@ -446,15 +466,13 @@ impl Studio {
         let missing_fender_folder = extension(&path) == "song" && !row.source.scope.directory;
         if missing_fender_folder {
             ui.label(
-                RichText::new(
-                    "Media·History를 보존하려면 .song이 있는 폴더를 탐색 위치에 추가하세요.",
-                )
-                .color(WARN),
+                RichText::new("Add the folder containing the .song to include Media and History.")
+                    .color(WARN),
             );
         }
         let can_copy = self.ready() && !review && !editing && !missing_fender_folder;
-        if action(ui, can_copy, "대상 선택 및 복사 계획") {
-            match folder("프로젝트 복사 대상 폴더 선택") {
+        if action(ui, can_copy, "Plan a copy") {
+            match folder("Choose a project copy destination") {
                 Ok(Some(destination)) => {
                     let related = self
                         .settings
@@ -463,19 +481,15 @@ impl Studio {
                         .cloned()
                         .unwrap_or_default();
                     let project = row.clone();
-                    self.job = Some(Job::start(
-                        ctx,
-                        "복사 계획 확인 중",
-                        move |cancel, _| {
-                            Ok(Outcome::Plan(project_plan(
-                                &project,
-                                &saved,
-                                &related,
-                                destination,
-                                cancel,
-                            )?))
-                        },
-                    ));
+                    self.job = Some(Job::start(ctx, "Preparing copy plan", move |cancel, _| {
+                        Ok(Outcome::Plan(project_plan(
+                            &project,
+                            &saved,
+                            &related,
+                            destination,
+                            cancel,
+                        )?))
+                    }));
                 }
                 Ok(None) => {}
                 Err(error) => self.error(error),
@@ -487,16 +501,16 @@ impl Studio {
 
     fn project_audio(&mut self, ui: &mut Ui, project: &Project) {
         let path = &project.source.path;
-        caption(ui, "관련 파일");
-        muted(ui, "참조 미확인 · DAW에서 미디어 연결을 확인하세요.");
+        caption(ui, "Related files");
+        muted(ui, "References unverified. Check media links in your DAW.");
         let related = self.settings.related.get(path).cloned().unwrap_or_default();
         if ui
-            .add_enabled(self.ready(), egui::Button::new("관련 파일 추가"))
+            .add_enabled(self.ready(), egui::Button::new("Add related file"))
             .clicked()
         {
-            match file("관련 파일 직접 선택") {
+            match file("Choose a related file") {
                 Ok(Some(pick)) if pick.directory => {
-                    self.error(anyhow::anyhow!("관련 파일 하나를 선택하세요."))
+                    self.error(anyhow::anyhow!("Choose one related file."))
                 }
                 Ok(Some(pick)) => {
                     let source = if project.source.scope.accepts(&pick.path) {
@@ -515,7 +529,7 @@ impl Studio {
             ui.horizontal(|ui| {
                 if ui
                     .add_enabled(self.ready(), egui::Button::new("×").small())
-                    .on_hover_text("관련 파일 지정 해제")
+                    .on_hover_text("Remove related file")
                     .clicked()
                 {
                     self.save_settings(|settings| {
@@ -528,7 +542,7 @@ impl Studio {
             });
         }
         ui.add_space(4.0);
-        egui::CollapsingHeader::new(format!("근처 오디오 후보 · {}개", project.nearby.len())).show(
+        egui::CollapsingHeader::new(format!("Nearby audio ({})", project.nearby.len())).show(
             ui,
             |ui| {
                 for source in &project.nearby {
@@ -538,7 +552,7 @@ impl Studio {
                                 self.ready() && !selected.contains(&source.path),
                                 egui::Button::new("+").small(),
                             )
-                            .on_hover_text("관련 파일로 추가")
+                            .on_hover_text("Add as related file")
                             .clicked()
                         {
                             self.add_related(path, source.clone());
@@ -557,7 +571,7 @@ impl Studio {
                 related.push(source);
             }
         }) {
-            self.status = "관련 파일 저장 완료 · 참조 미확인".into();
+            self.status = "Related file saved · Reference unverified".into();
         }
     }
 }

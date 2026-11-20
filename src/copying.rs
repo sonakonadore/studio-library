@@ -48,7 +48,7 @@ pub fn project_plan(
 ) -> Result<Plan> {
     ensure!(
         destination.directory && !edit.title.trim().is_empty(),
-        "곡 이름과 대상 폴더를 지정하세요."
+        "Enter a song title and choose a destination folder."
     );
     let project_path = PathBuf::from(safe_component(&edit.group)?)
         .join(safe_component(&edit.version)?)
@@ -62,7 +62,7 @@ pub fn project_plan(
     plan.destination.check(&plan.destination.path)?;
     ensure!(
         extension(&project.source.path) != "song" || project.source.scope.directory,
-        "Media·History를 확인할 수 있도록 .song이 있는 폴더를 탐색 위치에 추가하세요."
+        "Add the folder containing the .song to include Media and History."
     );
     let (copy_base, companions) = copy_parts(&project.source, project.directory)?;
     let path = project.source.path.strip_prefix(&copy_base)?.to_owned();
@@ -89,7 +89,12 @@ pub fn project_plan(
         {
             source.path.strip_prefix(&copy_base)?.to_owned()
         } else {
-            PathBuf::from("관련 파일").join(source.path.file_name().context("관련 파일 이름 없음")?)
+            PathBuf::from("관련 파일").join(
+                source
+                    .path
+                    .file_name()
+                    .context("Related file name is missing")?,
+            )
         };
         plan.add(source, relative, cancel)?;
     }
@@ -101,7 +106,7 @@ pub fn project_plan(
 pub fn sample_plan(sources: &[Source], destination: Scope, cancel: &AtomicBool) -> Result<Plan> {
     ensure!(
         destination.directory && !sources.is_empty(),
-        "복사할 샘플과 폴더를 선택하세요."
+        "Select samples and choose a destination folder."
     );
     let mut plan = Plan {
         destination,
@@ -111,8 +116,16 @@ pub fn sample_plan(sources: &[Source], destination: Scope, cancel: &AtomicBool) 
     };
     plan.destination.check(&plan.destination.path)?;
     for source in sources {
-        ensure!(source.metadata()?.is_file(), "샘플 파일을 확인하세요.");
-        let relative = PathBuf::from(source.path.file_name().context("샘플 파일 이름 없음")?);
+        ensure!(
+            source.metadata()?.is_file(),
+            "Select a regular sample file."
+        );
+        let relative = PathBuf::from(
+            source
+                .path
+                .file_name()
+                .context("Sample file name is missing")?,
+        );
         plan.add(source, relative, cancel)?;
     }
     plan.validate_names()?;
@@ -124,13 +137,10 @@ impl Plan {
     fn add(&mut self, source: &Source, relative: PathBuf, cancel: &AtomicBool) -> Result<()> {
         check_cancel(cancel)?;
         let meta = source.metadata()?;
-        ensure!(
-            !relative.as_os_str().is_empty(),
-            "복사할 이름을 확인하세요."
-        );
+        ensure!(!relative.as_os_str().is_empty(), "Check the copy name.");
         ensure!(
             !meta.is_dir() || !self.destination.path.starts_with(&source.path),
-            "원본 폴더 내부에는 복사할 수 없습니다. · {}",
+            "Choose a destination outside the source folder. · {}",
             source.path.display()
         );
         if meta.is_file() {
@@ -144,7 +154,7 @@ impl Plan {
         }
         ensure!(
             meta.is_dir(),
-            "지원하지 않는 파일 · {}",
+            "Unsupported file · {}",
             source.path.display()
         );
         let mut walker = WalkDir::new(&source.path)
@@ -186,7 +196,7 @@ impl Plan {
             let normalized = key(&entry.relative.to_string_lossy());
             ensure!(
                 paths.insert(normalized.clone()),
-                "복사 경로 이름이 겹칩니다. · {}",
+                "Duplicate copy path · {}",
                 entry.relative.display()
             );
             if !entry.directory {
@@ -197,7 +207,7 @@ impl Plan {
             for parent in entry.relative.ancestors().skip(1) {
                 ensure!(
                     !files.contains(&key(&parent.to_string_lossy())),
-                    "파일과 폴더의 경로가 겹칩니다. · {}",
+                    "File and folder names collide · {}",
                     parent.display()
                 );
             }
@@ -250,14 +260,14 @@ impl Plan {
                 }
                 ensure!(
                     self.destination.check(&current)?.is_dir(),
-                    "대상 상위 폴더를 확인하세요. · {}",
+                    "Check the destination parent folder · {}",
                     current.display()
                 );
             }
             let target = self.target();
             ensure!(
                 missing(&target)?,
-                "이미 같은 이름이 있습니다. · {}",
+                "That name already exists · {}",
                 target.display()
             );
         } else {
@@ -265,7 +275,7 @@ impl Plan {
                 let target = self.destination.path.join(&entry.relative);
                 ensure!(
                     missing(&target)?,
-                    "이미 같은 이름이 있습니다. · {}",
+                    "That name already exists · {}",
                     target.display()
                 );
             }
@@ -304,11 +314,15 @@ impl Plan {
                 fs::create_dir_all(target)?;
                 continue;
             }
-            fs::create_dir_all(target.parent().context("대상 상위 폴더 없음")?)?;
+            fs::create_dir_all(
+                target
+                    .parent()
+                    .context("Destination parent folder is missing")?,
+            )?;
             let mut input = entry.source.open()?;
             ensure!(
                 Stamp::from(&input.metadata()?) == entry.stamp,
-                "원본이 변경되었습니다. 복사 계획을 다시 만드세요."
+                "The source changed. Create a new copy plan."
             );
             let mut output = OpenOptions::new()
                 .write(true)
@@ -329,7 +343,9 @@ impl Plan {
         check_cancel(cancel)?;
         self.check_target()?;
         if let Some(path) = &self.project_path {
-            let parent = path.parent().context("대상 상위 폴더 없음")?;
+            let parent = path
+                .parent()
+                .context("Destination parent folder is missing")?;
             let mut directory = self.destination.path.clone();
             for part in parent {
                 directory.push(part);
@@ -340,7 +356,7 @@ impl Plan {
                 }
                 ensure!(
                     self.destination.check(&directory)?.is_dir(),
-                    "대상 폴더가 바뀌었습니다."
+                    "The destination folder changed."
                 );
             }
             check_cancel(cancel)?;
@@ -365,7 +381,7 @@ fn verify(entry: &Entry) -> Result<()> {
     let stamp = Stamp::from(&meta);
     ensure!(
         stamp == entry.stamp && meta.is_dir() == entry.directory,
-        "원본이 변경되었습니다. 복사 계획을 다시 만드세요. · {}",
+        "The source changed. Create a new copy plan. · {}",
         entry.source.path.display()
     );
     Ok(())
@@ -410,7 +426,7 @@ fn preserve_metadata(input: &File, output: &File) -> Result<()> {
             )
         };
         if code != 0 {
-            return Err(io::Error::last_os_error()).context("파일 메타데이터 복사 실패");
+            return Err(io::Error::last_os_error()).context("Could not copy file metadata");
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -436,7 +452,7 @@ fn rename_exclusive(from: &Path, to: &Path) -> Result<()> {
     if code != 0 {
         let error = io::Error::last_os_error();
         if error.kind() == io::ErrorKind::AlreadyExists {
-            anyhow::bail!("이미 같은 이름이 있습니다. · {}", to.display());
+            anyhow::bail!("That name already exists · {}", to.display());
         }
         return Err(error).with_context(|| to.display().to_string());
     }
@@ -448,12 +464,12 @@ impl CopyReport {
         let published = if self.published.is_empty() {
             String::new()
         } else {
-            format!(" · {}개 복사됨", self.published.len())
+            format!(" · {} copied", self.published.len())
         };
         match &self.outcome {
-            None => format!("복사 완료 · {}개", self.published.len()),
-            Some(error) if error.is::<Cancelled>() => format!("복사 취소됨{published}"),
-            Some(error) => format!("복사 실패{published} · {error:#}"),
+            None => format!("Copy complete · {} items", self.published.len()),
+            Some(error) if error.is::<Cancelled>() => format!("Copy canceled{published}"),
+            Some(error) => format!("Copy failed{published} · {error:#}"),
         }
     }
 }

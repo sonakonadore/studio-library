@@ -46,7 +46,7 @@ pub fn analyze(source: &Source, cancel: &AtomicBool) -> Result<Analysis> {
     }
     let mut format = probed.format;
     collect_metadata(format.metadata(), &mut embedded);
-    let track = format.default_track().context("오디오 트랙 없음")?;
+    let track = format.default_track().context("No audio track found")?;
     let id = track.id;
     let sample_rate = track.codec_params.sample_rate.unwrap_or_default();
     let frames = track.codec_params.n_frames.filter(|frames| *frames > 0);
@@ -70,7 +70,7 @@ pub fn analyze(source: &Source, cancel: &AtomicBool) -> Result<Analysis> {
         rate = spec.rate;
         ensure!(
             rate > 0 && spec.channels.count() > 0,
-            "오디오 스트림 형식 오류"
+            "Invalid audio stream format"
         );
         let buffer =
             samples.get_or_insert_with(|| SampleBuffer::<f32>::new(data.capacity() as u64, spec));
@@ -83,7 +83,7 @@ pub fn analyze(source: &Source, cancel: &AtomicBool) -> Result<Analysis> {
             break;
         }
     }
-    ensure!(signal.frames > 0 && rate > 0, "디코딩할 오디오가 없습니다.");
+    ensure!(signal.frames > 0 && rate > 0, "No decodable audio found.");
     collect_metadata(format.metadata(), &mut embedded);
     let seconds = frames.unwrap_or(signal.frames) as f64 / f64::from(rate);
     let mut tags = categories(&source.path, &source.scope.path, &embedded);

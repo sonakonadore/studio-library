@@ -105,6 +105,18 @@ pub(super) fn tag_parts(value: &str) -> Option<(&'static str, &'static str)> {
     Some((display, text))
 }
 
+pub(super) fn instrument_subgroup(value: &str) -> Option<&'static str> {
+    let instrument = value.strip_prefix("악기 · ")?;
+    Some(match instrument {
+        "드럼" | "킥" | "스네어" | "클랩" | "림샷" | "탐" | "클로즈드 햇" | "오픈 햇"
+        | "하이햇" | "라이드" | "크래시" | "심벌" => "Drums",
+        "퍼커션" | "셰이커" | "탬버린" | "카우벨" | "콩가·봉고" | "클라베" | "스냅" => {
+            "Percussion"
+        }
+        _ => "Other instruments",
+    })
+}
+
 pub(super) fn tag(value: &str) -> Cow<'_, str> {
     match tag_parts(value) {
         Some((category, label)) => Cow::Owned(format!("{category} · {label}")),
@@ -151,5 +163,20 @@ mod tests {
             assert_eq!(tag(user_tag), user_tag);
             assert_eq!(stored_tag(user_tag.to_owned()), user_tag);
         }
+    }
+
+    #[test]
+    fn instrument_subgroups_separate_drum_kit_and_percussion() {
+        for tag in ["악기 · 킥", "악기 · 스네어", "악기 · 클로즈드 햇"] {
+            assert_eq!(instrument_subgroup(tag), Some("Drums"));
+        }
+        for tag in ["악기 · 셰이커", "악기 · 콩가·봉고"] {
+            assert_eq!(instrument_subgroup(tag), Some("Percussion"));
+        }
+        assert_eq!(
+            instrument_subgroup("악기 · 기타"),
+            Some("Other instruments")
+        );
+        assert_eq!(instrument_subgroup("장르 · 하우스"), None);
     }
 }

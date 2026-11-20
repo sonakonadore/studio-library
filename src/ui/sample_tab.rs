@@ -392,31 +392,55 @@ impl Studio {
 
     fn tag_filter_menu(&mut self, ui: &mut Ui) {
         ui.set_min_width(180.0);
-        let mut groups = BTreeMap::<_, BTreeSet<_>>::new();
+        let mut groups = BTreeMap::<_, BTreeMap<_, BTreeSet<_>>>::new();
         for tag in self.samples.rows.iter().flat_map(|row| &row.tags) {
-            let (category, label) = labels::tag_parts(tag).unwrap_or(("Custom tags", tag.as_str()));
-            groups.entry(category).or_default().insert((label, tag));
+            let (category, label, subgroup) = match labels::tag_parts(tag) {
+                Some((category, label)) => (category, label, labels::instrument_subgroup(tag)),
+                None => ("Custom tags", tag.as_str(), None),
+            };
+            groups
+                .entry(category)
+                .or_default()
+                .entry(subgroup)
+                .or_default()
+                .insert((label, tag));
         }
         if groups.is_empty() {
             muted(ui, "표시할 태그 없음");
         }
-        for (category, tags) in groups {
+        let filters = &mut self.samples.filters;
+        let active_folder = &mut self.samples.active_folder;
+        for (category, subgroups) in groups {
             egui::CollapsingHeader::new(category).show(ui, |ui| {
-                for (label, tag) in tags {
-                    let mut selected =
-                        matches_tags(&self.samples.filters, std::slice::from_ref(tag));
-                    if ui.checkbox(&mut selected, label).changed() {
-                        if selected {
-                            self.samples.filters.push(tag.clone());
-                        } else {
-                            self.samples
-                                .filters
-                                .retain(|filter| key(filter) != key(tag));
-                        }
-                        self.samples.active_folder = None;
+                for (subgroup, tags) in subgroups {
+                    if let Some(subgroup) = subgroup {
+                        egui::CollapsingHeader::new(subgroup).show(ui, |ui| {
+                            Self::tag_choices(ui, tags, filters, active_folder);
+                        });
+                    } else {
+                        Self::tag_choices(ui, tags, filters, active_folder);
                     }
                 }
             });
+        }
+    }
+
+    fn tag_choices(
+        ui: &mut Ui,
+        tags: BTreeSet<(&str, &String)>,
+        filters: &mut Vec<String>,
+        active_folder: &mut Option<String>,
+    ) {
+        for (label, tag) in tags {
+            let mut selected = matches_tags(filters, std::slice::from_ref(tag));
+            if ui.checkbox(&mut selected, label).changed() {
+                if selected {
+                    filters.push(tag.clone());
+                } else {
+                    filters.retain(|filter| key(filter) != key(tag));
+                }
+                *active_folder = None;
+            }
         }
     }
 

@@ -23,9 +23,11 @@ pub(super) fn display_font(size: f32) -> FontId {
 pub(super) fn style(ctx: &Context) {
     let mut fonts = egui::FontDefinitions::default();
     if let Ok(bytes) = std::fs::read("/System/Library/Fonts/AppleSDGothicNeo.ttc") {
-        fonts
-            .font_data
-            .insert("Hangul".into(), egui::FontData::from_owned(bytes).into());
+        let hangul = egui::FontData::from_owned(bytes).tweak(egui::FontTweak {
+            scale: 0.93,
+            ..Default::default()
+        });
+        fonts.font_data.insert("Hangul".into(), hangul.into());
         for face in fonts.families.values_mut() {
             face.push("Hangul".into());
         }

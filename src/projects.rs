@@ -3,6 +3,7 @@ use anyhow::{Result, ensure};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, atomic::AtomicBool};
 use walkdir::WalkDir;
@@ -24,15 +25,17 @@ pub fn media_help(ext: &str) -> &'static str {
         "als" => "Ableton Live · File → Collect All and Save",
         "logicx" => "Logic Pro · File → Project Management → Consolidate",
         "song" => {
-            "Fender Studio Pro · File → Save to New Folder · .song 옆의 Media·History 폴더 보존"
+            "Fender Studio Pro · File → Save to New Folder · keep Media and History beside the .song file"
         }
         "cpr" => "Cubase · File → Back up Project",
-        "rpp" => "REAPER · Save Project As → 프로젝트 폴더 및 미디어 복사 옵션 선택",
+        "rpp" => {
+            "REAPER · Save Project As → choose the options to create a project folder and copy media"
+        }
         "flp" => "FL Studio · File → Export → Zipped loop package",
-        "ptx" => "Pro Tools · File → Save Copy In → 오디오 파일 포함",
-        "band" => "GarageBand · 프로젝트 저장 → Finder에서 .band 패키지 전체 확인",
+        "ptx" => "Pro Tools · File → Save Copy In → include audio files",
+        "band" => "GarageBand · Save the project and keep the entire .band package",
         "bwproject" => "Bitwig Studio · File → Collect and Save",
-        _ => "DAW에서 외부 미디어를 프로젝트 폴더로 수집 → 복사",
+        _ => "Collect external media in your DAW before copying.",
     }
 }
 
@@ -62,17 +65,17 @@ impl Rule {
             RuleKind::Extension => pattern.trim().trim_start_matches('.'),
             RuleKind::FolderName => pattern.trim(),
         };
-        ensure!(!daw.trim().is_empty(), "DAW 이름 입력 필요");
+        ensure!(!daw.trim().is_empty(), "Enter a DAW name.");
         ensure!(
             !pattern.is_empty()
                 && !pattern.contains(['/', '\\', ':'])
                 && !pattern.chars().any(char::is_control),
-            "탐색 규칙 형식 오류"
+            "Invalid detection rule."
         );
         if kind == RuleKind::Extension {
             ensure!(
                 !pattern.contains(['.', '*', '?']) && !pattern.chars().any(char::is_whitespace),
-                "확장자 1개 입력 (예시 .als)"
+                "Enter one file extension, such as .als."
             );
         }
         Ok(Self {
@@ -97,17 +100,39 @@ pub struct ProjectEdit {
     pub group: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Project {
     pub source: Source,
     pub daw: String,
     pub directory: bool,
     pub manual: bool,
     pub suggested: ProjectEdit,
+    #[serde(default)]
+    pub modified_day: Option<String>,
     pub review: bool,
+    #[serde(skip)]
+    pub offline: bool,
+    #[serde(skip)]
     pub companions: Vec<Source>,
+    #[serde(skip)]
     pub nearby: Vec<Source>,
     context: PathBuf,
+}
+
+impl Project {
+    pub fn grouping_location(&self) -> &Path {
+        &self.context
+    }
+
+    pub fn drive_name(&self) -> Option<String> {
+        self.source
+            .path
+            .strip_prefix("/Volumes")
+            .ok()?
+            .components()
+            .next()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+    }
 }
 
 #[derive(Default)]
@@ -115,6 +140,7 @@ pub struct Scan {
     pub projects: Vec<Project>,
     pub warnings: Vec<String>,
     pub skipped: usize,
+    pub(crate) incomplete: BTreeSet<PathBuf>,
 }
 
 pub fn scan(
@@ -131,6 +157,7 @@ pub fn scan(
         check_cancel(cancel)?;
         if let Err(error) = scope.check(&scope.path) {
             scan.warnings.push(format!("{error:#}"));
+            scan.incomplete.insert(scope.path.clone());
             continue;
         }
         let mut walk = WalkDir::new(&scope.path)
@@ -143,6 +170,7 @@ pub fn scan(
                 Ok(entry) => entry,
                 Err(error) => {
                     scan.warnings.push(error.to_string());
+                    scan.incomplete.insert(scope.path.clone());
                     continue;
                 }
             };
@@ -182,45 +210,66 @@ pub fn scan(
                 Ok(item) => {
                     found.entry(path.to_owned()).or_insert(item);
                 }
-                Err(error) => scan.warnings.push(format!("{error:#}")),
+                Err(error) => {
+                    scan.warnings.push(format!("{error:#}"));
+                    scan.incomplete.insert(scope.path.clone());
+                }
             }
             progress(found.len());
+        }
+        if let Err(error) = scope.check(&scope.path) {
+            scan.warnings.push(format!("{error:#}"));
+            scan.incomplete.insert(scope.path.clone());
+            found.retain(|_, project| project.source.scope != *scope);
         }
     }
 
     for scope in manual {
         check_cancel(cancel)?;
         if in_history(&scope.path) {
-            scan.warnings
-                .push(format!("History 항목 건너뜀 · {}", scope.path.display()));
+            scan.warnings.push(format!(
+                "Skipped an item in History · {}",
+                scope.path.display()
+            ));
             continue;
         }
-        let owner = roots
-            .iter()
-            .filter(|root| root.accepts(&scope.path))
-            .max_by_key(|root| root.path.components().count())
-            .unwrap_or(scope);
+        let owner = manual_owner(scope, roots);
         let source = owner.source(scope.path.clone());
         let item = project(source, scope.directory, true, rules, cancel, &mut scan);
         match item {
             Ok(item) => {
                 found.insert(scope.path.clone(), item);
             }
-            Err(error) => scan.warnings.push(format!("{error:#}")),
+            Err(error) => {
+                scan.warnings.push(format!("{error:#}"));
+                scan.incomplete.insert(scope.path.clone());
+            }
         }
         progress(found.len());
     }
     check_cancel(cancel)?;
     scan.projects = found.into_values().collect();
-    mark_review(&mut scan.projects);
-    scan.projects.sort_by_key(|item| {
+    order(&mut scan.projects);
+    Ok(scan)
+}
+
+pub(crate) fn manual_owner<'a>(scope: &'a Scope, roots: &'a [Scope]) -> &'a Scope {
+    roots
+        .iter()
+        .filter(|root| root.accepts(&scope.path))
+        .max_by_key(|root| root.path.components().count())
+        .unwrap_or(scope)
+}
+
+pub(crate) fn order(projects: &mut [Project]) {
+    mark_review(projects);
+    projects.sort_by_key(|item| {
         (
             key(&item.suggested.group),
             item.suggested.version.clone(),
             item.source.path.clone(),
         )
     });
-    Ok(scan)
 }
 
 fn in_history(path: &Path) -> bool {
@@ -251,7 +300,7 @@ static VERSION: LazyLock<Regex> = LazyLock::new(|| {
         .unwrap()
 });
 
-fn title_version(value: &str) -> (String, Option<String>) {
+pub fn title_version(value: &str) -> (String, Option<String>) {
     let value = value.trim();
     let Some(captures) = VERSION.captures(value) else {
         return (value.to_owned(), None);
@@ -316,7 +365,7 @@ fn project(
     cancel: &AtomicBool,
     scan: &mut Scan,
 ) -> Result<Project> {
-    source.metadata()?;
+    let metadata = source.metadata()?;
     let path = &source.path;
     let strip_ext = !directory
         || matches!(extension(path).as_str(), "logicx" | "band")
@@ -356,8 +405,10 @@ fn project(
                 Ok(entry) if entry.file_type().is_file() && is_audio(entry.path()) => {
                     nearby.push(source.scope.source(entry.into_path()));
                     if nearby.len() >= 200 {
-                        scan.warnings
-                            .push(format!("오디오 후보 최대 200개 표시 · {}", path.display()));
+                        scan.warnings.push(format!(
+                            "Showing the first 200 nearby audio files · {}",
+                            path.display()
+                        ));
                         break;
                     }
                 }
@@ -373,11 +424,28 @@ fn project(
         directory,
         manual,
         suggested,
+        modified_day: local_day(metadata.mtime()),
         review: false,
+        offline: false,
         companions,
         nearby,
         context,
     })
+}
+
+fn local_day(timestamp: libc::time_t) -> Option<String> {
+    let mut day = std::mem::MaybeUninit::<libc::tm>::uninit();
+    // localtime_r writes a fully initialized tm on success.
+    if unsafe { libc::localtime_r(&timestamp, day.as_mut_ptr()) }.is_null() {
+        return None;
+    }
+    let day = unsafe { day.assume_init() };
+    Some(format!(
+        "{:04}-{:02}-{:02}",
+        day.tm_year + 1900,
+        day.tm_mon + 1,
+        day.tm_mday
+    ))
 }
 
 pub(crate) fn copy_parts(source: &Source, directory: bool) -> Result<(PathBuf, Vec<Source>)> {

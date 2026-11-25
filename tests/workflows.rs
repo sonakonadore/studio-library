@@ -18,6 +18,85 @@ fn fixture(root: &Path, relative: &str, bytes: &[u8]) -> Result<PathBuf> {
 }
 
 #[test]
+fn project_catalog_retains_disconnected_locations_across_restarts() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let project =
+        fixture(temp.path(), "Studio Drive/Songs/Orbit v02.als", b"project")?.canonicalize()?;
+    let manual =
+        fixture(temp.path(), "Studio Drive/Songs/Side B.custom", b"project")?.canonicalize()?;
+    let local = fixture(temp.path(), "Local/Lantern v01.cpr", b"project")?.canonicalize()?;
+    let drive = Scope::select(&temp.path().join("Studio Drive"))?;
+    let mut settings = Settings {
+        roots: vec![drive.clone(), Scope::select(&temp.path().join("Local"))?],
+        manual: vec![Scope::select(&manual)?],
+        ..Settings::default()
+    };
+    let db = temp.path().join("library.sqlite3");
+    let cancel = AtomicBool::new(false);
+    let store = Store::open(&db)?;
+    let first = store.scan_projects(&settings, &cancel, |_| {})?;
+    assert_eq!(first.projects.len(), 3);
+    assert!(first.projects.iter().all(|row| !row.offline));
+    let modified_day = first
+        .projects
+        .iter()
+        .find(|row| row.source.path == project)
+        .and_then(|row| row.modified_day.clone())
+        .context("first scan records modified date")?;
+    assert_eq!(modified_day.len(), 10);
+    drop(store);
+
+    let disconnected = temp.path().join("disconnected");
+    fs::rename(&drive.path, &disconnected)?;
+    fs::create_dir(&drive.path)?;
+    fixture(&drive.path, "Unexpected.als", b"on a different drive")?;
+    fs::remove_file(local)?;
+    let store = Store::open(&db)?;
+    assert_eq!(store.cached_projects(&settings)?.len(), 3);
+    let offline = store.scan_projects(&settings, &cancel, |_| {})?;
+    assert_eq!(offline.projects.len(), 2);
+    let row = offline
+        .projects
+        .iter()
+        .find(|row| row.source.path == project)
+        .unwrap();
+    assert_eq!(row.suggested.title, "Orbit");
+    assert_eq!(row.suggested.version, "v02");
+    assert_eq!(row.modified_day.as_deref(), Some(modified_day.as_str()));
+    assert!(row.offline);
+    assert!(
+        offline
+            .projects
+            .iter()
+            .any(|row| row.source.path == manual && row.offline)
+    );
+    let mut mounted = row.clone();
+    mounted.source.path = PathBuf::from("/Volumes/Studio Drive/Songs/Orbit v02.als");
+    assert_eq!(mounted.drive_name().as_deref(), Some("Studio Drive"));
+
+    cancel.store(true, Ordering::Relaxed);
+    assert!(store.scan_projects(&settings, &cancel, |_| {}).is_err());
+    assert_eq!(store.cached_projects(&settings)?.len(), 2);
+    cancel.store(false, Ordering::Relaxed);
+    fs::rename(&drive.path, temp.path().join("replacement"))?;
+    fs::rename(disconnected, &drive.path)?;
+    let online = store.scan_projects(&settings, &cancel, |_| {})?;
+    assert_eq!(online.projects.len(), 2);
+    assert!(online.projects.iter().all(|row| !row.offline));
+
+    settings.roots.remove(0);
+    settings.manual.clear();
+    assert!(store.cached_projects(&settings)?.is_empty());
+    assert!(
+        store
+            .scan_projects(&settings, &cancel, |_| {})?
+            .projects
+            .is_empty()
+    );
+    Ok(())
+}
+
+#[test]
 fn groups_versions_and_flags_distinct_same_title_candidates() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let root = Scope::select(temp.path())?;
@@ -242,6 +321,40 @@ fn pcm_aiff() -> Vec<u8> {
     bytes.extend([0; 8]);
     bytes.resize(bytes.len() + pcm_bytes as usize, 0);
     bytes
+}
+
+#[test]
+fn combines_sample_folders_and_keeps_cached_rows_when_one_disconnects() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let splice = temp.path().join("Splice");
+    let external = temp.path().join("External/Samples");
+    fixture(&splice, "Kick.wav", &pcm_wave())?;
+    fixture(&external, "Snare.wav", &pcm_wave())?;
+    let root = Scope::select(&splice)?;
+    let other = Scope::select(&external)?;
+    let mut settings: Settings = serde_json::from_value(serde_json::json!({ "samples": root }))?;
+    assert_eq!(settings.sample_folders().count(), 1);
+    settings.additional_sample_folders.push(other);
+    settings.dark_mode = true;
+    let db = temp.path().join("data.sqlite3");
+    Store::open(&db)?.save_settings(&settings)?;
+    let mut store = Store::open(&db)?;
+    let settings = store.settings()?;
+    assert!(settings.dark_mode);
+    let folders: Vec<_> = settings.sample_folders().cloned().collect();
+    let stop = AtomicBool::new(false);
+    let scan = store.scan_sample_folders(&folders, &[], &stop, |_, _| {})?;
+    assert_eq!(scan.rows.len(), 2);
+    assert_eq!(scan.decoded, 2);
+    store.tag_sample(&scan.rows[0].source, &["내 샘플".into()])?;
+    fs::rename(&external, external.with_file_name("Disconnected"))?;
+    let scan = store.scan_sample_folders(&folders, &[], &stop, |_, _| {})?;
+    assert_eq!(scan.rows.len(), 2);
+    assert_eq!(scan.decoded, 0);
+    assert_eq!(scan.warnings.len(), 1);
+    assert_eq!(scan.rows[0].tags, ["내 샘플"]);
+    assert_eq!(store.samples_in(settings.sample_folders())?.len(), 2);
+    Ok(())
 }
 
 #[test]

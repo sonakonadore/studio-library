@@ -2241,7 +2241,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "eframe",
- "image",
  "libc",
  "objc2-app-kit 0.3.2",
  "raw-window-handle",

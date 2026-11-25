@@ -12,6 +12,7 @@ app="$work/Studio Library.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 /usr/bin/install -m 755 "${CARGO_TARGET_DIR:-target}/$target/release/studio-library" "$app/Contents/MacOS/studio-library"
 /usr/bin/install -m 644 assets/StudioLibrary.icns "$app/Contents/Resources/StudioLibrary.icns"
+/usr/bin/install -m 644 assets/fonts/ibm-plex-sans/LICENSE.txt "$app/Contents/Resources/IBM Plex Sans License.txt"
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -25,7 +26,7 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
   <key>CFBundleName</key><string>Studio Library</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>12</string>
+  <key>CFBundleVersion</key><string>19</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>

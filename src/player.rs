@@ -65,7 +65,10 @@ impl Player {
                                 notify(request, Playback::Playing(source.path));
                             }
                             Err(error) => {
-                                notify(request, Playback::Error(format!("재생 실패 · {error:#}")));
+                                notify(
+                                    request,
+                                    Playback::Error(format!("Playback failed · {error:#}")),
+                                );
                             }
                         }
                     }

@@ -1,4 +1,24 @@
 use std::borrow::Cow;
+use std::path::Path;
+use studio_library::scope::name;
+use unicode_normalization::{UnicodeNormalization, is_nfc};
+
+pub(super) fn composed<'a>(value: impl Into<Cow<'a, str>>) -> Cow<'a, str> {
+    let value = value.into();
+    if is_nfc(&value) {
+        value
+    } else {
+        Cow::Owned(value.nfc().collect())
+    }
+}
+
+pub(super) fn display_path(path: &Path) -> Cow<'_, str> {
+    composed(path.to_string_lossy())
+}
+
+pub(super) fn display_name(path: &Path) -> String {
+    composed(name(path)).into_owned()
+}
 
 type Labels = (
     &'static str,
@@ -150,6 +170,20 @@ pub(super) fn version(value: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn composes_decomposed_hangul_for_display_and_keeps_the_original_path() {
+        let raw = "/Volumes/\u{1111}\u{1169}\u{11AF}\u{1103}\u{1165}/\u{1100}\u{1169}\u{11BC}\u{1107}\u{116E} v02.als";
+        let path = Path::new(raw);
+        assert_eq!(display_path(path), "/Volumes/폴더/공부 v02.als");
+        assert_eq!(display_name(path), "공부 v02.als");
+        assert_eq!(path.to_str(), Some(raw));
+        assert_eq!(composed("ㄱㅗㅇㅂㅜ"), "ㄱㅗㅇㅂㅜ");
+        assert_eq!(
+            studio_library::scope::key(raw),
+            studio_library::scope::key(&display_path(path))
+        );
+    }
 
     #[test]
     fn translated_tags_round_trip_without_changing_custom_tags() {

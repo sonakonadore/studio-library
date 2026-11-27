@@ -2,6 +2,8 @@
 
 여러 DAW 프로젝트를 곡과 버전별로 정리하고, 다운로드한 Splice 샘플을 검색하고 미리듣는 Apple Silicon Mac용 오프라인 앱입니다. 지정한 폴더에서 파일을 읽고, 복사를 승인하면 원본을 보존한 채 대상 폴더에 보관합니다.
 
+프로듀서 소낙(sonakonadore)이 작업 중인 곡의 여러 세션과 샘플을 다시 찾기 위해 만든 도구입니다. [Mac에서 실행하는 방법](#mac에서-실행) · [소낙의 작업 기록](https://blog.naver.com/sonakonadore)
+
 ## 최근 변경
 
 - 왼쪽 위 **Studio Library** 클릭 또는 `Tab` 키로 **Projects**와 **Samples**를 전환합니다.
